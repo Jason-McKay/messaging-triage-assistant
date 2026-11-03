@@ -1,0 +1,35 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+
+# IDEs
+.idea/
+*.iml
+*.iws
+.vscode/
+.project
+.classpath
+.settings/
+bin/
+out/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.bak
+*.orig
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local environment and tool settings: may hold credentials or machine paths
+.env
+.env.*
+.claude/

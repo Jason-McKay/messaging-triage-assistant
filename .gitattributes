@@ -1,0 +1,9 @@
+# Normalise text to LF in the repo; check out by platform unless pinned below.
+* text=auto
+
+# Shell scripts must stay LF, or bash fails on the carriage returns.
+*.sh text eol=lf
+mvnw text eol=lf
+
+# Windows batch files keep CRLF.
+*.cmd text eol=crlf
