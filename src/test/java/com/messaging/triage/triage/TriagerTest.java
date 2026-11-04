@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.messaging.triage.guard.ActionGuard;
 import com.messaging.triage.report.FailureGroup;
 import com.messaging.triage.report.FailureReport;
 import com.messaging.triage.report.Sample;
@@ -133,6 +134,57 @@ class TriagerTest {
   }
 
   @Test
+  void adviceToResendIsFlaggedCappedAtLowAndPutBehindTheWarning() {
+    String resend = "Add the template, then resend all of them.";
+    chatModel.answer("NP-1", valid("The template is missing.").replace("Add the template.", resend))
+      .answer("MI-1", valid("The payload has no orderId."));
+
+    Triager.Verdict verdict = triager.triage(report("NP-1", "MI-1"));
+
+    GroupDiagnosis np = verdict.answer().diagnoses().getFirst();
+    assertThat(np.flags()).containsExactly(DiagnosisFlag.RECOMMENDS_STATE_CHANGE);
+    assertThat(np.confidence()).as("HIGH in the answer, capped by code").isEqualTo(Confidence.LOW);
+    assertThat(np.suggestedNextStep()).isEqualTo(ActionGuard.WARNING + " " + resend);
+    GroupDiagnosis mi = verdict.answer().diagnoses().get(1);
+    assertThat(mi.flags()).isEmpty();
+    assertThat(mi.suggestedNextStep()).isEqualTo("Add the template.");
+    assertThat(verdict.answer().summary())
+      .endsWith(" Advice to change message state, which v1 never acts on (confidence capped at LOW): NP-1.");
+    assertThat(verdict.outcome().attempts()).as("a flag, not a repair").isEqualTo(2);
+  }
+
+  @Test
+  void adviceInAnyFieldTheModelWroteIsFlagged() {
+    chatModel.answer("NP-1", valid("The template is missing, so purge the DLQ."))
+      .answer("NP-2", valid("The template is missing.").replace("the template store", "Replay the dead letters."))
+      .answer("NP-3", quoting("The template is missing.", "unknown template", "Resend all dead letters now."))
+      .answer("MI-1", valid("The payload has no orderId."));
+
+    Triager.Verdict verdict = triager.triage(report("NP-1", "NP-2", "NP-3", "MI-1"));
+
+    assertThat(verdict.answer().diagnoses()).extracting(GroupDiagnosis::groupId, GroupDiagnosis::flags)
+      .containsExactly(tuple("NP-1", List.of(DiagnosisFlag.RECOMMENDS_STATE_CHANGE)),
+        tuple("NP-2", List.of(DiagnosisFlag.RECOMMENDS_STATE_CHANGE)),
+        tuple("NP-3", List.of(DiagnosisFlag.RECOMMENDS_STATE_CHANGE, DiagnosisFlag.UNSUPPORTED)),
+        tuple("MI-1", List.of()));
+    assertThat(verdict.answer().diagnoses().subList(0, 3)).extracting(GroupDiagnosis::suggestedNextStep)
+      .as("the warning goes on the next step wherever the advice was")
+      .containsOnly(ActionGuard.WARNING + " Add the template.");
+  }
+
+  @Test
+  void adviceAgainstAStateChangeIsNotFlagged() {
+    String negated = "Add the template. Do not resend until it exists.";
+    chatModel.answer("NP-1", valid("The template is missing.").replace("Add the template.", negated));
+
+    GroupDiagnosis diagnosis = triager.triage(report("NP-1")).answer().diagnoses().getFirst();
+
+    assertThat(diagnosis.flags()).isEmpty();
+    assertThat(diagnosis.confidence()).isEqualTo(Confidence.HIGH);
+    assertThat(diagnosis.suggestedNextStep()).isEqualTo(negated);
+  }
+
+  @Test
   void aQuoteOfWhatTheModelWasNotShownIsUnsupported() {
     // The report keeps the injected key for the operator; the model saw a placeholder. A
     // quote of the raw key can only have come from somewhere else, and the placeholder alone
@@ -146,8 +198,9 @@ class TriagerTest {
     chatModel.answer("NP-1", quoting("The data holds instructions.", ModelViewTest.INJECTED_KEY))
       .answer("NP-1", quoting("The key is not a template.", ModelViewTest.KEY_PLACEHOLDER));
 
+    // The raw key also tells the operator to resend, so quoting it is advice as well.
     assertThat(triager.triage(report).answer().diagnoses().getFirst().flags())
-      .containsExactly(DiagnosisFlag.UNSUPPORTED);
+      .containsExactly(DiagnosisFlag.RECOMMENDS_STATE_CHANGE, DiagnosisFlag.UNSUPPORTED);
     assertThat(triager.triage(report).answer().diagnoses().getFirst().flags())
       .containsExactly(DiagnosisFlag.UNSUPPORTED);
 

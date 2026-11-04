@@ -48,10 +48,13 @@ class TriageSummaryTest {
     SourceSection np = section("notification-platform", "NP", 3, group("NP-1", 1, false), group("NP-2", 1, false),
       group("NP-3", 1, false));
 
-    String summary = TriageSummary.write(report(np), List.of(diagnosis("NP-1").flagged(DiagnosisFlag.UNSUPPORTED),
-      diagnosis("NP-2"), diagnosis("NP-3").flagged(DiagnosisFlag.UNSUPPORTED)));
+    String summary = TriageSummary.write(report(np), List.of(
+      diagnosis("NP-1").flagged(DiagnosisFlag.UNSUPPORTED).flagged(DiagnosisFlag.RECOMMENDS_STATE_CHANGE),
+      diagnosis("NP-2").flagged(DiagnosisFlag.RECOMMENDS_STATE_CHANGE),
+      diagnosis("NP-3").flagged(DiagnosisFlag.UNSUPPORTED)));
 
-    assertThat(summary).endsWith(" Evidence not in the group's own data (confidence capped at LOW): NP-1, NP-3.");
+    assertThat(summary).endsWith(" Advice to change message state, which v1 never acts on (confidence capped at LOW): "
+      + "NP-1, NP-2. Evidence not in the group's own data (confidence capped at LOW): NP-1, NP-3.");
   }
 
   @Test

@@ -18,8 +18,7 @@ public record GroupAnswer(
     + "pattern, LOW if a guess.")
   @NotNull Confidence confidence,
 
-  @JsonPropertyDescription("The one thing a person should do next. Never resend, delete or move messages "
-    + "until the cause is fixed.")
+  @JsonPropertyDescription("The one thing a person should do next to confirm or fix the cause.")
   @NotBlank String suggestedNextStep,
 
   @JsonPropertyDescription("Specific things to look at to confirm the cause: a config key, a template, a "

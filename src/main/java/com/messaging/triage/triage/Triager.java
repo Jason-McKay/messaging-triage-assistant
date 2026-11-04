@@ -1,5 +1,6 @@
 package com.messaging.triage.triage;
 
+import com.messaging.triage.guard.ActionGuard;
 import com.messaging.triage.guard.EvidenceCheck;
 import com.messaging.triage.guard.RepeatedDiagnosisCheck;
 import com.messaging.triage.report.FailureGroup;
@@ -7,7 +8,9 @@ import com.messaging.triage.report.FailureReport;
 import com.messaging.triage.source.SourceSection;
 import com.messaging.triage.support.Problems;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -44,7 +47,8 @@ import tools.jackson.databind.json.JsonMapper;
  *       once, shown the other's words; one that still repeats, or has no call left, is
  *       unusable rather than kept as a copy (ADR 0005).</li>
  *   <li>Each usable answer is checked in code: its evidence must be in its group's own data,
- *       or it is flagged and its confidence capped (ADR 0005).</li>
+ *       and no field it wrote may advise a change to message state, or it is flagged and its
+ *       confidence capped (ADR 0005).</li>
  *   <li>The answer is assembled in code: each diagnosis under the id of the group it was
  *       asked about, and a summary written from the report's counts ({@link TriageSummary}).
  *       A group still unusable is left out and named; if none is usable, {@code usable=false}
@@ -242,8 +246,12 @@ public class Triager {
 
   /**
    * The answer as a diagnosis, after the checks code makes of what the model wrote (ADR 0005):
-   * evidence that is missing or not in the group's own data flags it UNSUPPORTED, and only the
-   * quotes that held are kept.
+   * <ul>
+   *   <li>evidence that is missing or not in the group's own data flags it UNSUPPORTED, and
+   *       only the quotes that held are kept;</li>
+   *   <li>advice to change message state in any field it wrote, evidence included, flags it
+   *       RECOMMENDS_STATE_CHANGE and puts its next step behind the fixed warning.</li>
+   * </ul>
    */
   private static GroupDiagnosis checked(GroupRun run) {
     EvidenceCheck.Result evidence = EvidenceCheck.check(run.answer.evidence(), ModelView.shownTexts(run.group),
@@ -254,7 +262,26 @@ public class Triager {
         evidence.matched().size(), evidence.unmatched());
       diagnosis = diagnosis.flagged(DiagnosisFlag.UNSUPPORTED);
     }
+    List<String> advising = fieldsAdvisingStateChange(run.answer);
+    if (!advising.isEmpty()) {
+      log.info("triage {}: advice to change message state in {}", run.group.id(), String.join(", ", advising));
+      diagnosis = diagnosis.flagged(DiagnosisFlag.RECOMMENDS_STATE_CHANGE)
+        .withNextStep(ActionGuard.warned(diagnosis.suggestedNextStep()));
+    }
     return diagnosis;
+  }
+
+  /** The names of the fields the model wrote that advise a change to message state. */
+  private static List<String> fieldsAdvisingStateChange(GroupAnswer answer) {
+    Map<String, List<String>> fields = new LinkedHashMap<>();
+    fields.put("probableCause", Collections.singletonList(answer.probableCause()));
+    fields.put("suggestedNextStep", Collections.singletonList(answer.suggestedNextStep()));
+    fields.put("whatToCheck", answer.whatToCheck() == null ? List.of() : answer.whatToCheck());
+    fields.put("evidence", answer.evidence() == null ? List.of() : answer.evidence());
+    return fields.entrySet().stream()
+      .filter(field -> field.getValue().stream().anyMatch(ActionGuard::recommendsStateChange))
+      .map(Map.Entry::getKey)
+      .toList();
   }
 
   /** One call in a free slot; null, with nothing sent, once the model has failed for any group. */

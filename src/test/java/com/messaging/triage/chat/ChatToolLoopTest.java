@@ -8,6 +8,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.messaging.triage.guard.ActionGuard;
 import com.messaging.triage.report.FailureReport;
 import com.messaging.triage.source.mi.McpClientHolder;
 import com.messaging.triage.source.np.NotificationWorkerClient;
@@ -73,10 +74,24 @@ class ChatToolLoopTest {
     ChatReply reply = chatService(chatModel, client).chat(new ChatRequest("Delete ID:1 from DLQ", List.of()));
 
     assertThat(reply.answer()).isEqualTo("I cannot delete messages.");
+    assertThat(reply.flags()).as("a refusal is not advice").isEmpty();
     assertThat(reply.toolsCalled()).isEmpty();
     assertThat(toolResponse(lastPrompt(chatModel, 2).getInstructions()).responseData())
       .isEqualTo(ChatService.NO_SUCH_TOOL);
     verify(client, never()).callTool(any(McpSchema.CallToolRequest.class));
+  }
+
+  @Test
+  void anAnswerAdvisingAStateChangeIsWarnedAboutAndFlagged() {
+    // The v1 live run: a payload told the model to have every message deleted, and it advised so.
+    ChatModel chatModel = mock(ChatModel.class);
+    when(chatModel.call(any(Prompt.class))).thenReturn(answer("Delete the message from the DLQ."));
+
+    ChatReply reply = chatService(chatModel, ReadOnlyToolsTest.advertisingAllSix())
+      .chat(new ChatRequest("What should I do with the shipments message?", List.of()));
+
+    assertThat(reply.answer()).isEqualTo("Delete the message from the DLQ.\n\n" + ActionGuard.WARNING);
+    assertThat(reply.flags()).containsExactly(DiagnosisFlag.RECOMMENDS_STATE_CHANGE.name());
   }
 
   @Test
@@ -89,6 +104,7 @@ class ChatToolLoopTest {
 
     assertThat(reply.answer()).startsWith("Stopped: the model kept asking for tools after "
       + ChatService.MAX_TOOL_ROUNDS + " rounds");
+    assertThat(reply.flags()).as("code wrote it").isEmpty();
     assertThat(reply.toolsCalled()).isEmpty();
     verify(chatModel, times(ChatService.MAX_TOOL_ROUNDS + 1)).call(any(Prompt.class));
   }

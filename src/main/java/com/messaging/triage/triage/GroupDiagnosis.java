@@ -24,13 +24,18 @@ public record GroupDiagnosis(
       List.copyOf(answer.whatToCheck()), List.copyOf(evidence), List.of());
   }
 
-  /** This diagnosis with {@code flag} added and its confidence capped at LOW. */
+  /** This diagnosis with {@code flag} added, in the enum's order, and its confidence capped at LOW. */
   GroupDiagnosis flagged(DiagnosisFlag flag) {
     List<DiagnosisFlag> added = new ArrayList<>(flags);
     if (!added.contains(flag)) {
       added.add(flag);
+      added.sort(null);
     }
     return new GroupDiagnosis(groupId, probableCause, Confidence.LOW, suggestedNextStep, whatToCheck, evidence,
       List.copyOf(added));
+  }
+
+  GroupDiagnosis withNextStep(String nextStep) {
+    return new GroupDiagnosis(groupId, probableCause, confidence, nextStep, whatToCheck, evidence, flags);
   }
 }
