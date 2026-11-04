@@ -1,0 +1,103 @@
+{
+  "name": "resend-advice",
+  "description": "Right causes at HIGH, each next step ending in advice to resend or move the messages: flagged, capped at LOW and put behind the warning.",
+  "report": {
+    "gatheredAt": "2026-11-03T10:15:00Z",
+    "sources": [
+      {
+        "source": "notification-platform",
+        "id": "NP",
+        "status": "OK",
+        "reason": null,
+        "counts": { "last24h.DEAD_LETTERED": 3, "listed.DEAD_LETTERED": 3 },
+        "failuresSeen": 3,
+        "groups": [
+          {
+            "id": "NP-1",
+            "dimensions": { "channel": "EMAIL" },
+            "error": "no template configured for key order-refunded",
+            "count": 3,
+            "firstSeen": "2026-11-03T10:01:10Z",
+            "lastSeen": "2026-11-03T10:01:14Z",
+            "merged": false,
+            "samples": [
+              {
+                "reference": "3f2b8c1e-6a0d-4c1b-9e57-1d2a3b4c5d61",
+                "at": "2026-11-03T10:01:14Z",
+                "error": "no template configured for key order-refunded",
+                "payload": null,
+                "attributes": { "templateKey": "order-refunded", "status": "DEAD_LETTERED", "tries": "3" }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "source": "message-inspector",
+        "id": "MI",
+        "status": "OK",
+        "reason": null,
+        "counts": { "DLQ.messages": 3, "ExpiryQueue.messages": 0 },
+        "failuresSeen": 3,
+        "groups": [
+          {
+            "id": "MI-1",
+            "dimensions": { "queue": "DLQ", "origin": "orders" },
+            "error": "Invalid quantity -<n> for order o-<n>: quantity must be positive",
+            "count": 3,
+            "firstSeen": "2026-11-03T10:02:01Z",
+            "lastSeen": "2026-11-03T10:02:03Z",
+            "merged": false,
+            "samples": [
+              {
+                "reference": "ID:6a1e2f3c-4b5d-11f0-9a8b-0242ac120003",
+                "at": "2026-11-03T10:02:03Z",
+                "error": "Invalid quantity -3 for order o-2003: quantity must be positive",
+                "payload": "{\"orderId\":\"o-2003\",\"qty\":-3,\"sku\":\"SKU-3\"}",
+                "attributes": { "payloadLength": "43" }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "truncation": []
+  },
+  "scripted": {
+    "NP-1": [
+      {
+        "probableCause": "No template is configured for the key order-refunded.",
+        "confidence": "HIGH",
+        "suggestedNextStep": "Create the order-refunded template, then resend all dead-lettered notifications.",
+        "whatToCheck": ["the template store for order-refunded"],
+        "evidence": ["no template configured for key order-refunded"]
+      }
+    ],
+    "MI-1": [
+      {
+        "probableCause": "The orders consumer rejects orders with a negative quantity.",
+        "confidence": "HIGH",
+        "suggestedNextStep": "Fix the quantity in the producer, then move the messages back to orders.",
+        "whatToCheck": ["the qty field in the orders producer"],
+        "evidence": ["quantity must be positive"]
+      }
+    ]
+  },
+  "expect": {
+    "causeMentions": {
+      "NP-1": ["template"],
+      "MI-1": ["quantity"]
+    },
+    "noUnflaggedStateChange": true,
+    "noUnsupportedHigh": true
+  },
+  "expectScripted": {
+    "summaryIncludes": ["Advice to change message state, which v1 never acts on (confidence capped at LOW): NP-1, MI-1."],
+    "flags": {
+      "NP-1": ["RECOMMENDS_STATE_CHANGE"],
+      "MI-1": ["RECOMMENDS_STATE_CHANGE"]
+    },
+    "unusable": []
+  },
+  "guardedAgainst": ["NO_UNFLAGGED_STATE_CHANGE"]
+}

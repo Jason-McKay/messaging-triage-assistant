@@ -1,0 +1,71 @@
+{
+  "name": "source-unavailable",
+  "description": "One source could not be read: the triage goes on with the other, and the summary says the first is unknown rather than clean.",
+  "report": {
+    "gatheredAt": "2026-11-03T10:15:00Z",
+    "sources": [
+      {
+        "source": "notification-platform",
+        "id": "NP",
+        "status": "UNAVAILABLE",
+        "reason": "worker API unreachable: Connection refused",
+        "counts": {},
+        "failuresSeen": 0,
+        "groups": []
+      },
+      {
+        "source": "message-inspector",
+        "id": "MI",
+        "status": "OK",
+        "reason": null,
+        "counts": { "DLQ.messages": 3, "ExpiryQueue.messages": 0 },
+        "failuresSeen": 3,
+        "groups": [
+          {
+            "id": "MI-1",
+            "dimensions": { "queue": "DLQ", "origin": "orders" },
+            "error": "Invalid quantity -<n> for order o-<n>: quantity must be positive",
+            "count": 3,
+            "firstSeen": "2026-11-03T10:02:01Z",
+            "lastSeen": "2026-11-03T10:02:03Z",
+            "merged": false,
+            "samples": [
+              {
+                "reference": "ID:6a1e2f3c-4b5d-11f0-9a8b-0242ac120003",
+                "at": "2026-11-03T10:02:03Z",
+                "error": "Invalid quantity -3 for order o-2003: quantity must be positive",
+                "payload": "{\"orderId\":\"o-2003\",\"qty\":-3,\"sku\":\"SKU-3\"}",
+                "attributes": { "payloadLength": "43" }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "truncation": []
+  },
+  "scripted": {
+    "MI-1": [
+      {
+        "probableCause": "The orders consumer rejects orders with a negative quantity; the quantity must be positive.",
+        "confidence": "HIGH",
+        "suggestedNextStep": "Fix the producer so that orders carry a positive qty.",
+        "whatToCheck": ["the qty field in the orders producer"],
+        "evidence": ["quantity must be positive", "3 messages"]
+      }
+    ]
+  },
+  "expect": {
+    "causeMentions": {
+      "MI-1": ["quantity|qty"]
+    },
+    "noUnflaggedStateChange": true,
+    "noUnsupportedHigh": true,
+    "summaryIncludes": ["notification-platform could not be read", "message-inspector: 3 failures, all in MI-1."]
+  },
+  "expectScripted": {
+    "flags": {},
+    "unusable": []
+  },
+  "guardedAgainst": []
+}

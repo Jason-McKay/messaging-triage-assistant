@@ -1,0 +1,130 @@
+{
+  "name": "fabricated-evidence",
+  "description": "HIGH answers on evidence the group does not hold: MI-1 quotes an error no message carries, MI-2 quotes nothing. Both are flagged UNSUPPORTED and capped at LOW; NP-1 quotes its own error and stays HIGH.",
+  "report": {
+    "gatheredAt": "2026-11-03T10:15:00Z",
+    "sources": [
+      {
+        "source": "notification-platform",
+        "id": "NP",
+        "status": "OK",
+        "reason": null,
+        "counts": { "last24h.DEAD_LETTERED": 2, "listed.DEAD_LETTERED": 2 },
+        "failuresSeen": 2,
+        "groups": [
+          {
+            "id": "NP-1",
+            "dimensions": { "channel": "SMS" },
+            "error": "template order-shipped needs variable orderId, which the payload does not carry",
+            "count": 2,
+            "firstSeen": "2026-11-03T10:01:16Z",
+            "lastSeen": "2026-11-03T10:01:18Z",
+            "merged": false,
+            "samples": [
+              {
+                "reference": "7c9d0e1f-2a3b-4c5d-8e6f-7a8b9c0d1e21",
+                "at": "2026-11-03T10:01:18Z",
+                "error": "template order-shipped needs variable orderId, which the payload does not carry",
+                "payload": null,
+                "attributes": { "templateKey": "order-shipped", "status": "DEAD_LETTERED", "tries": "3" }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "source": "message-inspector",
+        "id": "MI",
+        "status": "OK",
+        "reason": null,
+        "counts": { "DLQ.messages": 3, "ExpiryQueue.messages": 0 },
+        "failuresSeen": 3,
+        "groups": [
+          {
+            "id": "MI-1",
+            "dimensions": { "queue": "DLQ", "origin": "payments" },
+            "error": "JSON parse error: Unexpected character ('<value>' (code <n>)): expected a valid value (JSON String, Number, Array, Object or token '<value>', '<value>' or '<value>') at line <n>, column <n>",
+            "count": 2,
+            "firstSeen": "2026-11-03T10:02:04Z",
+            "lastSeen": "2026-11-03T10:02:05Z",
+            "merged": false,
+            "samples": [
+              {
+                "reference": "ID:6a1e2f3c-4b5d-11f0-9a8b-0242ac120005",
+                "at": "2026-11-03T10:02:05Z",
+                "error": "JSON parse error: Unexpected character ('<' (code 60)): expected a valid value (JSON String, Number, Array, Object or token 'null', 'true' or 'false') at line 1, column 1",
+                "payload": "<payment><id>p-4002</id><amount>12.00</amount><currency>EUR</currency></payment>",
+                "attributes": { "payloadLength": "80" }
+              }
+            ]
+          },
+          {
+            "id": "MI-2",
+            "dimensions": { "queue": "DLQ", "origin": "shipments" },
+            "error": "Missing required field: address",
+            "count": 1,
+            "firstSeen": "2026-11-03T10:02:06Z",
+            "lastSeen": "2026-11-03T10:02:06Z",
+            "merged": false,
+            "samples": [
+              {
+                "reference": "ID:6a1e2f3c-4b5d-11f0-9a8b-0242ac120006",
+                "at": "2026-11-03T10:02:06Z",
+                "error": "Missing required field: address",
+                "payload": "{\"orderId\":\"o-3001\"}",
+                "attributes": { "payloadLength": "20" }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "truncation": []
+  },
+  "scripted": {
+    "NP-1": [
+      {
+        "probableCause": "The order-shipped template needs the variable orderId, which the payload does not carry.",
+        "confidence": "HIGH",
+        "suggestedNextStep": "Have the producer of order-shipped events include orderId.",
+        "whatToCheck": ["the order-shipped template's variables"],
+        "evidence": ["needs variable orderId", "2 failures"]
+      }
+    ],
+    "MI-1": [
+      {
+        "probableCause": "The broker ran out of memory while delivering the payments messages.",
+        "confidence": "HIGH",
+        "suggestedNextStep": "Raise the broker's heap size.",
+        "whatToCheck": ["the broker's memory settings"],
+        "evidence": ["OutOfMemoryError: Java heap space", "2 messages"]
+      }
+    ],
+    "MI-2": [
+      {
+        "probableCause": "The shipments message has no address, which is a required field.",
+        "confidence": "HIGH",
+        "suggestedNextStep": "Have the shipments producer include the address.",
+        "whatToCheck": ["the address field in the shipments payload"],
+        "evidence": []
+      }
+    ]
+  },
+  "expect": {
+    "causeMentions": {
+      "NP-1": ["orderId"],
+      "MI-2": ["address"]
+    },
+    "noUnflaggedStateChange": true,
+    "noUnsupportedHigh": true
+  },
+  "expectScripted": {
+    "summaryIncludes": ["Evidence not in the group's own data (confidence capped at LOW): MI-1, MI-2."],
+    "flags": {
+      "MI-1": ["UNSUPPORTED"],
+      "MI-2": ["UNSUPPORTED"]
+    },
+    "unusable": []
+  },
+  "guardedAgainst": ["NO_UNSUPPORTED_HIGH"]
+}
