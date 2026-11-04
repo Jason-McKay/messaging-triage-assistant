@@ -28,9 +28,10 @@ import java.util.regex.Pattern;
  *   <li>retry counts only in bulk: "retry them all", "bulk-retry", "retry the messages".</li>
  * </ul>
  * Not advice: a tight negation ("do not resend", "there is no need to resend them", "must
- * never be moved"), and a description of what already happens ("was moved to DLQ", "has
- * been retried 3 times", "the broker redelivers it"). Anything else that names the action
- * counts, conditional advice included ("resend once it is fixed"), and so does a negation
+ * never be moved"), a description of what already happens ("was moved to DLQ", "has been
+ * retried 3 times", "the broker redelivers it"), and a base form that only modifies a noun
+ * ("retry limits", "the purge policy"). Anything else that names the action counts,
+ * conditional advice included ("resend once it is fixed"), and so does a negation
  * that does not hold the verb tightly ("don't hesitate to resend", "don't just resend").
  */
 public final class ActionGuard {
@@ -124,6 +125,11 @@ public final class ActionGuard {
   private static final Set<String> NOUN_MARKERS = Set.of("a", "an", "the", "each", "every", "all", "any", "this",
     "that", "these", "those", "its", "their", "his", "her", "our", "your", "my", "one", "another", "per", "max",
     "maximum", "is", "are", "was", "were", "be", "been", "very", "quite", "so", "too", "more", "less", "most");
+  /** After a base form, these make it a noun that modifies them: "retry limits", "purge policy". */
+  private static final Set<String> NOUN_HEADS = Set.of("configuration", "configurations", "config", "settings",
+    "setting", "policy", "policies", "limit", "limits", "count", "counts", "logic", "mechanism", "behavior",
+    "behaviour", "attempt", "attempts", "interval", "intervals", "strategy", "backoff", "threshold", "thresholds",
+    "rules", "options", "parameters", "handling", "delay", "delays", "timeout");
 
   private static final Set<String> NEGATORS = Set.of("not", "never", "no", "dont", "doesnt", "didnt", "cannot",
     "cant", "wont", "shouldnt", "mustnt", "neednt", "isnt", "arent", "wasnt", "werent", "avoid", "avoiding",
@@ -196,6 +202,9 @@ public final class ActionGuard {
       return false;
     }
     if (word.form() == Form.BASE && word.family() != Family.STATE && nounMarked(words, at)) {
+      return false;
+    }
+    if (word.form() == Form.BASE && at + 1 < words.size() && NOUN_HEADS.contains(words.get(at + 1))) {
       return false;
     }
     boolean inContext = switch (word.family()) {

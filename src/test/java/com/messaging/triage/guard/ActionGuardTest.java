@@ -140,6 +140,18 @@ class ActionGuardTest {
   }
 
   @Test
+  void aBaseFormThatModifiesANounIsNoVerb() {
+    // whatToCheck items qwen3:8b wrote in the guarded live run, flagged until this rule.
+    assertNotFlagged(
+      "Retry configuration for notifications with templateKey=no-such-template",
+      "Dead-lettering settings and retry limits for notifications in notification-platform",
+      "Check the purge policy for the DLQ.");
+    assertFlagged(
+      "Retry the notifications once the retry configuration is fixed.",
+      "Purge the DLQ, then review the purge policy.");
+  }
+
+  @Test
   void theWarningItselfNamesNoAction() {
     assertNotFlagged(ActionGuard.WARNING);
     assertThat(ActionGuard.WARNING).matches("\\p{ASCII}+");
