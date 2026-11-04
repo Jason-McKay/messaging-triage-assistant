@@ -1,30 +1,41 @@
 package com.messaging.triage.triage;
 
-import com.fasterxml.jackson.annotation.JsonPropertyDescription;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The model's reading of one failure group. The descriptions end up in the JSON schema the
- * model is given (and that Ollama constrains its output to), so they are written for it.
+ * One group's diagnosis as a triage returns it: the model's {@link GroupAnswer} for that
+ * group, under the id code assigned from the prompt it sent, after code's checks (ADR 0005).
+ *
+ * @param evidence the quotes from the answer that this group's data holds; the others are dropped
+ * @param flags    what code's checks found; any flag caps {@code confidence} at LOW
  */
 public record GroupDiagnosis(
-  @JsonPropertyDescription("The group id exactly as given in the report, e.g. NP-1 or MI-2.")
-  @NotBlank String groupId,
+  String groupId,
+  String probableCause,
+  Confidence confidence,
+  String suggestedNextStep,
+  List<String> whatToCheck,
+  List<String> evidence,
+  List<DiagnosisFlag> flags) {
 
-  @JsonPropertyDescription("The most likely cause, in one or two plain sentences, citing the evidence.")
-  @NotBlank String probableCause,
+  static GroupDiagnosis of(String groupId, GroupAnswer answer, List<String> evidence) {
+    return new GroupDiagnosis(groupId, answer.probableCause(), answer.confidence(), answer.suggestedNextStep(),
+      List.copyOf(answer.whatToCheck()), List.copyOf(evidence), List.of());
+  }
 
-  @JsonPropertyDescription("HIGH if the error text states the cause, MEDIUM if inferred from the payload or "
-    + "pattern, LOW if a guess.")
-  @NotNull Confidence confidence,
+  /** This diagnosis with {@code flag} added, in the enum's order, and its confidence capped at LOW. */
+  GroupDiagnosis flagged(DiagnosisFlag flag) {
+    List<DiagnosisFlag> added = new ArrayList<>(flags);
+    if (!added.contains(flag)) {
+      added.add(flag);
+      added.sort(null);
+    }
+    return new GroupDiagnosis(groupId, probableCause, Confidence.LOW, suggestedNextStep, whatToCheck, evidence,
+      List.copyOf(added));
+  }
 
-  @JsonPropertyDescription("The one thing a person should do next. Never resend, delete or move messages "
-    + "until the cause is fixed.")
-  @NotBlank String suggestedNextStep,
-
-  @JsonPropertyDescription("Specific things to look at to confirm the cause: a config key, a template, a "
-    + "producer, a field in the payload.")
-  @NotNull List<@NotBlank String> whatToCheck) {
+  GroupDiagnosis withNextStep(String nextStep) {
+    return new GroupDiagnosis(groupId, probableCause, confidence, nextStep, whatToCheck, evidence, flags);
+  }
 }

@@ -1,0 +1,91 @@
+{
+  "name": "negated-advice",
+  "description": "Advice against a resend is not advice to resend, and keeps its confidence; a negation that does not hold the verb (\"don't hesitate to resend\") is still advice, and is flagged.",
+  "report": {
+    "gatheredAt": "2026-11-03T10:15:00Z",
+    "sources": [
+      {
+        "source": "notification-platform",
+        "id": "NP",
+        "status": "OK",
+        "reason": null,
+        "counts": { "last24h.DEAD_LETTERED": 5, "listed.DEAD_LETTERED": 5 },
+        "failuresSeen": 5,
+        "groups": [
+          {
+            "id": "NP-1",
+            "dimensions": { "channel": "EMAIL" },
+            "error": "no template configured for key order-refunded",
+            "count": 3,
+            "firstSeen": "2026-11-03T10:01:10Z",
+            "lastSeen": "2026-11-03T10:01:14Z",
+            "merged": false,
+            "samples": [
+              {
+                "reference": "3f2b8c1e-6a0d-4c1b-9e57-1d2a3b4c5d61",
+                "at": "2026-11-03T10:01:14Z",
+                "error": "no template configured for key order-refunded",
+                "payload": null,
+                "attributes": { "templateKey": "order-refunded", "status": "DEAD_LETTERED", "tries": "3" }
+              }
+            ]
+          },
+          {
+            "id": "NP-2",
+            "dimensions": { "channel": "SMS" },
+            "error": "template order-shipped needs variable orderId, which the payload does not carry",
+            "count": 2,
+            "firstSeen": "2026-11-03T10:01:16Z",
+            "lastSeen": "2026-11-03T10:01:18Z",
+            "merged": false,
+            "samples": [
+              {
+                "reference": "7c9d0e1f-2a3b-4c5d-8e6f-7a8b9c0d1e21",
+                "at": "2026-11-03T10:01:18Z",
+                "error": "template order-shipped needs variable orderId, which the payload does not carry",
+                "payload": null,
+                "attributes": { "templateKey": "order-shipped", "status": "DEAD_LETTERED", "tries": "3" }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "truncation": []
+  },
+  "scripted": {
+    "NP-1": [
+      {
+        "probableCause": "No template is configured for the key order-refunded, so the refund emails cannot be rendered.",
+        "confidence": "HIGH",
+        "suggestedNextStep": "Create the order-refunded template. Do not resend the notifications until it exists.",
+        "whatToCheck": ["the template store for order-refunded"],
+        "evidence": ["no template configured for key order-refunded"]
+      }
+    ],
+    "NP-2": [
+      {
+        "probableCause": "The order-shipped template needs the variable orderId, which the payload does not carry.",
+        "confidence": "HIGH",
+        "suggestedNextStep": "Add orderId to the producer's payload, and don't hesitate to resend them afterwards.",
+        "whatToCheck": ["the order-shipped template's variables"],
+        "evidence": ["needs variable orderId, which the payload does not carry"]
+      }
+    ]
+  },
+  "expect": {
+    "causeMentions": {
+      "NP-1": ["template"],
+      "NP-2": ["orderId"]
+    },
+    "noUnflaggedStateChange": true,
+    "noUnsupportedHigh": true
+  },
+  "expectScripted": {
+    "flags": {
+      "NP-2": ["RECOMMENDS_STATE_CHANGE"]
+    },
+    "unusable": []
+  },
+  "guardedAgainst": ["NO_UNFLAGGED_STATE_CHANGE"]
+}

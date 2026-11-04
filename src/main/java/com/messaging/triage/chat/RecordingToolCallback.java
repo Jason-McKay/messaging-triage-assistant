@@ -1,6 +1,7 @@
 package com.messaging.triage.chat;
 
 import com.messaging.triage.support.Problems;
+import com.messaging.triage.triage.ModelView;
 import com.messaging.triage.triage.Untrusted;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,7 +14,8 @@ import org.springframework.ai.tool.metadata.ToolMetadata;
  * Wraps a chat tool so that:
  * <ul>
  *   <li>every call is recorded by name, for the reply's {@code toolsCalled};</li>
- *   <li>its output reaches the model fenced as untrusted and capped (ADR 0003);</li>
+ *   <li>its output reaches the model fenced as untrusted and capped (ADR 0003), with the prose
+ *       in message payloads abstracted ({@link ModelView#toolOutput}, ADR 0006);</li>
  *   <li>a failure becomes text the model can read ("the tool failed: ...") rather than an
  *       exception that ends the chat;</li>
  *   <li>a model stuck in a loop is stopped after {@link Calls#limit()} calls.</li>
@@ -103,7 +105,7 @@ public class RecordingToolCallback implements ToolCallback {
     }
     try {
       String output = toolContext == null ? delegate.call(toolInput) : delegate.call(toolInput, toolContext);
-      return Untrusted.wrap("tool-result", output, maxOutputChars);
+      return Untrusted.wrap("tool-result", ModelView.toolOutput(output), maxOutputChars);
     } catch (RuntimeException e) {
       onFailure.run();
       return "The tool failed: " + Untrusted.wrap("tool-error", Problems.describe(e), MAX_ERROR_CHARS);

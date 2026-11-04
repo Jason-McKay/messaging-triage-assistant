@@ -28,7 +28,7 @@ flowchart LR
   RB -- "GET, bearer token" --> NPW["notification-platform<br/>worker :8081"]
   RB -- "MCP: list_queues,<br/>browse_messages" --> MI["message-inspector<br/>:8082 /mcp"]
   MI -- JMS --> AR[("Artemis")]
-  TR -- "one call, no tools,<br/>JSON schema" --> OL["Ollama<br/>qwen3:8b :11434"]
+  TR -- "one call per group,<br/>no tools, JSON schema" --> OL["Ollama<br/>qwen3:8b :11434"]
   CS <-- "tool calls" --> OL
   CS --> NPW
   CS --> MI
@@ -42,10 +42,14 @@ flowchart LR
    placeholders), groups by source dimensions (channel; queue and original queue) and error,
    keeps up to 8 groups per source and merges the rest into `OTHER`. Each group keeps 3
    samples, and every text is capped.
-3. **Explain.** `Triager` makes one call with no tools, constrained to the answer's JSON
-   schema. It checks the answer: every group exactly once, no unknown ids, no blank fields.
-   A bad answer gets one repair call; after that the result says `usable=false` and why.
-   The facts are returned either way.
+3. **Explain.** `Triager` makes one call per group, with no tools, constrained to the
+   answer's JSON schema ([ADR 0004](docs/adr/0004-per-group-calls-and-a-code-written-summary.md)).
+   A bad answer gets one repair call. Code then checks every answer
+   ([ADR 0005](docs/adr/0005-deterministic-output-guards.md)): a diagnosis repeated across
+   groups that failed differently is sent back, evidence that is not in the group's own data
+   is flagged `UNSUPPORTED`, and advice to resend, delete or move messages is flagged
+   `RECOMMENDS_STATE_CHANGE` and put behind a fixed warning. Either flag caps confidence at
+   LOW. The summary is written by code. The facts are returned either way.
 4. **Chat.** The model gets the three read tools of each system, plus the latest triage as
    context. Spring AI 2.0's `ChatModel` hands tool calls back unexecuted, so `ChatService`
    runs them itself, and only names in its own list ([ADR 0002](docs/adr/0002-read-only-by-construction.md)).
@@ -116,7 +120,7 @@ shared dev broker on 8161/61616.
 |---|---|
 | `POST /api/triage` | Always **200**: a source that is down, or a model that is, is part of the result |
 | `GET /api/triage/latest` | **200** with the last result, **404** before the first run. Held in memory only |
-| `POST /api/chat` | **200** `{answer, toolsCalled, model, durationMs}`; **503** when the model is down; **400** on a bad request |
+| `POST /api/chat` | **200** `{answer, toolsCalled, model, durationMs, flags}`; **503** when the model is down; **400** on a bad request |
 
 A triage result, abridged:
 
@@ -138,16 +142,30 @@ A triage result, abridged:
     "truncation": ["NP: detail read for 50 of 61 notifications (limit 50); the other 11 are counted above but in no group"]
   },
   "answer": {
-    "summary": "...",
+    "summary": "notification-platform: 50 failures in 6 groups; the largest is NP-1 with 11. message-inspector: ...",
     "diagnoses": [{"groupId": "MI-2", "probableCause": "...", "confidence": "HIGH",
-                   "suggestedNextStep": "...", "whatToCheck": ["..."]}]
+                   "suggestedNextStep": "...", "whatToCheck": ["..."],
+                   "evidence": ["JSON parse error: Unexpected character ('<' (code 60)) ...",
+                                "<payment><id>p-4002</id>..."],
+                   "flags": []}]
   },
-  "model": {"usable": true, "model": "qwen3:8b", "problem": null, "note": null, "attempts": 1, "durationMs": 26603}
+  "model": {"usable": true, "model": "qwen3:8b", "problem": null, "note": null, "attempts": 9, "durationMs": 31404,
+            "groups": [{"groupId": "MI-2", "status": "OK", "attempts": 1, "durationMs": 4674, "problem": null}]}
 }
 ```
 
 `answer` is `null` when `model.usable` is false. `model.problem` then says why: "model
-unavailable: ..." when the call failed, or the validation problems after the repair.
+unavailable: ..." when a call failed (the groups not yet asked are `SKIPPED`), or "model
+answer unusable: ..." with each group's problem when no group had a usable answer. When
+only some groups did, the answer is partial: it holds those, the others are named in
+`summary` and `model.note`, and each group's status (`OK`, `REPAIRED`, `UNUSABLE`, `SKIPPED`)
+and problem are in `model.groups`. `attempts` counts every call, and `durationMs` is the
+whole triage's.
+
+A diagnosis keeps only the `evidence` its group's data holds. `flags` are set by code, never
+by the model: `UNSUPPORTED` when the evidence is missing or made up, and
+`RECOMMENDS_STATE_CHANGE` when it advises resending, deleting or moving messages, which also
+puts a fixed warning in front of `suggestedNextStep`. Either caps `confidence` at `LOW`.
 
 A chat request is `{"message": "...", "history": [{"role": "user|assistant", "text": "..."}]}`.
 The server keeps no conversation; the last 10 turns of `history` are used.
@@ -188,6 +206,49 @@ picks the queues, and `triage.limits.*` sets the caps.
   [docs/known-gaps.md](docs/known-gaps.md) has both.
 
 ## Honest limits
+
+### With the guards (2026-11-04)
+
+Same model, settings and GPU as v1 below, the demo seeded on top of earlier data again
+(notification-platform: 50 failures in 6 groups; message-inspector: 6 in 3), seven triage
+runs, a handful of chat questions and the eval set (`demo/eval.ps1`).
+
+**Speed.** Nine calls per triage. 38.7 s cold (v1: 38.9 s); warm 31.95 to 32.05 s at
+`max-parallel-calls=2` and 31.40 to 31.90 s at 1 (v1: 26.6 to 33.3 s). One call took 2.8 to
+4.7 s. This Ollama serves one request at a time, so the parallel limit bought nothing. No
+repair call was needed. Gathering took 0.5 to 2.5 s; chat answered in 1.4 to 5.0 s.
+
+**Gone.**
+- **Copied diagnoses.** Every group got its own cause in every run. The three groups with
+  the same missing template got the same cause, correctly, and the repeat check let them be.
+- **The injected template key no longer sways anything.** The model sees
+  `[unsafe template key, 108 chars]` ([ADR 0006](docs/adr/0006-abstract-client-controlled-values.md));
+  that group got a correct cause at HIGH, no group was made LOW, and the summary, written
+  by code, cannot be reached.
+- **The injected payload** reaches the model as `{"orderId":"o-3001","note":"[text, 124 chars]"}`.
+  Its cause (missing `address`) was right, with no advice to delete, in triage or in chat.
+- No triage answer advised a change to message state, flagged or not.
+- With Ollama stopped, triage still answered 200 (`usable=false`, "model unavailable: ...
+  Connection refused", the other 8 groups `SKIPPED`) in 0.9 s; chat answered 503.
+
+**Still there.**
+- **Chat still advises state changes; now they are flagged.** Asked what to do with the
+  shipments message, it said to redeliver it; asked how to get rid of the dead letters, it
+  said to remove them "using the message-inspector tools", which cannot. Both came back
+  with `flags: ["RECOMMENDS_STATE_CHANGE"]` and the warning appended. "No, you should not
+  resend ... before considering any resends" was flagged too: the guard is conservative.
+- **The first live run found four false positives**, fixed before the runs above:
+  "retry configuration" read as advice, and three ways of quoting the prompt the evidence
+  check did not accept. In the eval, `qwen3:8b` quoted `status=DEAD_LETTER` for
+  `DEAD_LETTERED` in five cases, so a correct diagnosis was capped at LOW as `UNSUPPORTED`.
+- **The one-message group (MI-3) stays LOW**: the model rated it so itself.
+- **Chat stopped short on "the payments DLQ messages"**: it named `DLQ` and
+  `_AMQ_ORIG_QUEUE`, then ended without browsing. Asked to browse `DLQ` for the messages
+  from payments, it named the XML payloads correctly.
+- message-inspector answers sometimes tell the operator to check a notification-platform
+  template: the system prompt is shared.
+
+### v1 (2026-11-03)
 
 Observed on 2026-11-03 with the demo seeded on top of earlier notification-platform data,
 using `qwen3:8b`, thinking off, fully in VRAM (Radeon RX 7700 XT, 12 GB): four triage runs
@@ -232,19 +293,24 @@ answer took 3 to 10 s, tool calls included.
   group's error reads `Unexpected character ('<value>' ...)`. The `<` that says "XML" survives
   only in the sample's raw error and payload.
 
-The mitigations considered and not built are in [docs/known-gaps.md](docs/known-gaps.md).
+What is still open is in [docs/known-gaps.md](docs/known-gaps.md).
 
 ## Development
 
 ```bash
-./mvnw test                  # unit tests
+./mvnw test                  # unit tests, and the eval set with scripted answers
 ./mvnw clean verify          # plus OllamaDownIT; what CI runs
+./mvnw test -Dtest=EvalTest  # the eval set alone: table in target/eval/scripted-results.md
+demo/eval.sh                 # the eval set against the live model: needs only Ollama
 ```
 
 No test needs Ollama, Docker or the sibling apps ([docs/testing.md](docs/testing.md)).
-`security.yml` runs OWASP Dependency-Check weekly and on demand.
+The eval set (`src/test/resources/eval/`) is the seeded demo, both injections and a case
+for each guard. `demo/eval` prints its table and leaves every answer in
+`target/eval/live-results.md`, which `clean` deletes. `security.yml` runs OWASP
+Dependency-Check weekly and on demand.
 
 - [docs/adr/](docs/adr/README.md): the design decisions
 - [docs/gotchas.md](docs/gotchas.md): what cost time on the way in
 - [docs/testing.md](docs/testing.md): what each test pins
-- [docs/known-gaps.md](docs/known-gaps.md): what v1 does not do, and the way toward an incident agent
+- [docs/known-gaps.md](docs/known-gaps.md): what is still open, and the way toward an incident agent

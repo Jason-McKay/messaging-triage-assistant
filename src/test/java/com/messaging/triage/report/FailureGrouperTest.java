@@ -17,7 +17,7 @@ class FailureGrouperTest {
 
   private static final Instant T0 = Instant.parse("2026-11-03T10:00:00Z");
 
-  private final FailureGrouper grouper = new FailureGrouper(new Limits(8, 3, 300, 50, 100, 12000));
+  private final FailureGrouper grouper = new FailureGrouper(new Limits(8, 3, 300, 50, 100, 12000, 2));
 
   @Test
   void normalizesIdsNumbersAndQuotedValuesSoOneCauseIsOneGroup() {

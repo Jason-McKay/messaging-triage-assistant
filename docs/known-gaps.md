@@ -1,51 +1,78 @@
 # Known gaps
 
-What v1 leaves open, and what closing each would take. The observations behind the first
-section are in the README's "Honest limits" (2026-11-03, `qwen3:8b`, the seeded demo).
+What is still open, and what closing each would take. The observations behind the first
+two sections are in the README's "Honest limits": v1 on 2026-11-03, and the guards (ADRs
+0004 to 0006) on 2026-11-04, both with `qwen3:8b` on the seeded demo.
+
+Closed by the guards, and kept here only as a pointer: diagnoses copied onto groups they do
+not fit (ADR 0004, 0005), the injected template key and payload swaying the answers
+(ADR 0004, 0006), unflagged advice to change message state (ADR 0005), and the missing eval
+set (`EvalTest`, `demo/eval`).
 
 ## Diagnosis quality
 
-- **One diagnosis copied onto groups it does not fit.** In every run read in full, the
-  missing-`orderId` diagnosis was given to several notification-platform groups whose error
-  was a missing template. `AnswerValidator` checks shape (every group once, no unknown ids,
-  no blank fields), not fit. Candidate fixes, none built:
-  - flag a `probableCause` repeated word for word across groups whose errors differ, and
-    spend the existing repair call on it;
-  - one model call per group, or per source, which trades latency for focus;
-  - an `evidence` field the validator can check against the group's own error text.
-- **Injected instructions were partly followed, and never reported.** Both system messages
-  tell the model to say when the data contains instructions; it never did. The
-  notification-platform injection made every notification-platform group LOW in all three
-  runs, and twice put "resend all dead letters" into the summary; in chat the model advised deleting a message because its payload said
-  to. Fencing (ADR 0003) lowers the odds; it does not make them zero. Candidate fixes:
-  - a deterministic flag on any answer that recommends a resend, delete or move, shown to the
-    operator beside it;
-  - a deterministic flag when an answer repeats an action named inside fenced data;
-  - a second, tool-less check of the answer against the report.
-  None of this can change either system today; the risk is an operator taking the advice.
+- **The guards are lexical.** They read words, not meaning (ADR 0005).
+  - `ActionGuard` misses an action word not in its lists, another language, and advice
+    spelled out over several clauses. It also flags more than advice: "No, you should not
+    resend ... before considering any resends" was flagged in chat, and "the payload says to
+    delete every message" is flagged on purpose, since words alone cannot tell a quote of
+    the data from advice.
+  - `EvidenceCheck` proves a quote is in the group, not that it supports the cause. It is
+    strict where the model is sloppy: `qwen3:8b` quoted `status=DEAD_LETTER` for
+    `DEAD_LETTERED` in five eval cases, and each correct diagnosis lost its HIGH as
+    `UNSUPPORTED`. A repair call for unsupported evidence was rejected for now: shown what it
+    may quote, the model can fit a quote to the cause it already chose.
+  - `RepeatedDiagnosisCheck` takes a copy reworded below 80% word overlap for a different
+    cause.
+- **A repeat sends both groups back**, the original too: the check cannot tell which came
+  first. Two groups whose errors differ but whose cause really is the same are repaired and
+  may end unusable. Not seen live, since the demo's one shared cause has the same error each
+  time.
+- **No diagnosis relates one group to another.** Each call sees one group (ADR 0004), and the
+  summary is code that names ids, counts and flags only. "NP-1, NP-2 and NP-3 fail on the
+  same missing template" is for the reader to see. A model pass across the groups would bring
+  back the one field an injection reached in v1.
+- **The prompt's rule to report instructions in the data has never been seen working.** In v1
+  the model never reported one; in the guarded runs it had none to report, since both demo
+  injections reach it as placeholders (ADR 0006). An injection in an error text, an XML
+  payload, a message property or a plain identifier still reaches the model, fenced, and no
+  seed or eval case carries one yet. There, only the guards stand behind the fence.
+- **The system prompt is shared by both sources**, and message-inspector answers sometimes
+  tell the operator to check a notification-platform template. A line per source in the
+  prompt is the likely fix; it is not built.
+- **The model cannot read an unsafe template key.** A key that is not a plain identifier
+  reaches it as `[unsafe template key, N chars]`, so it can say the key is not usable, not
+  which template was meant. The operator still has the key in the report (ADR 0006).
 - **Normalization hides a clue.** `ErrorTextNormalizer` replaces quoted values, so
   `Unexpected character ('<' ...)` becomes `('<value>' ...)` in the group's error. The `<`
-  survives in each sample's raw error and payload, which the prompt also carries, and the
-  model named XML in 2 of 3 runs. Keeping single punctuation characters would cost a
-  separate group per stray character.
-- **No eval set.** The observations are a handful of runs read by hand. Recording runs (the
-  report and the answer) and scoring them against the seeds would turn "it seemed right"
-  into a number, and is the precondition for trying another model or prompt.
-- **Chat took "the payments DLQ messages" to mean the `payments` queue**, even after the
-  system message explained `_AMQ_ORIG_QUEUE`, and when told to browse `DLQ` it showed the
-  first message rather than a payments one. A `browse_messages` filter on the original
-  queue would be a message-inspector change.
+  survives in each sample's raw error and payload, which the prompt also carries; the model
+  named XML in 2 of 3 v1 runs and in all 7 guarded ones. Keeping single punctuation
+  characters would cost a separate group per stray character.
+- **The eval set is small and written by hand.** Nine cases (`src/test/resources/eval/`)
+  whose scripted answers show each guard at work, and the same reports sent to the live
+  model on demand (`demo/eval`), which reports rather than asserts. Its measures are lexical
+  too: word overlap for a copy, named words for a cause. Recorded live runs scored against
+  the seeds would make a larger set, and a fair comparison of models.
+- **Chat stops short on "the payments DLQ messages".** In v1 it browsed the empty `payments`
+  queue; with the guards it named `DLQ` and `_AMQ_ORIG_QUEUE`, then ended without browsing.
+  Told to browse `DLQ` for the messages from payments, it did. A `browse_messages` filter on
+  the original queue would be a message-inspector change.
 
 ## Model
 
 - **Only `qwen3:8b` with thinking off was tried**, on one 12 GB GPU. `TRIAGE_MODEL` takes any
   Ollama model, but the schema-constrained output and tool calling were seen to work only
-  with this one.
-- **A triage answer takes 27 to 39 s**, held on one HTTP request. A smaller GPU or CPU only
-  takes minutes, which is why the read timeout is 5 minutes. A job with a status to poll
-  would suit a caller better than a held request.
-- **Two triage requests at once are not serialized.** Each gathers and calls the model;
-  Ollama queues the second, and whichever finishes last becomes `latest`.
+  with this one. `demo/eval` is the way to try another.
+- **A triage takes 31 to 39 s on the demo**, held on one HTTP request: nine calls of 2.8 to
+  4.7 s, one after another, since this Ollama serves one request at a time. Time grows with
+  the groups, up to `max-groups` per source and two calls each. A smaller GPU or CPU only
+  takes minutes per call, which is why the read timeout is 5 minutes. A job with a status to
+  poll would suit a caller better than a held request.
+- **Two triage requests at once are not serialized.** Their calls share one limit
+  (`max-parallel-calls`), so both take longer, and whichever finishes last becomes `latest`.
+- **The prompt budget is still the report's.** `prompt-budget-chars` caps the sample text of
+  all groups together, as when one prompt held them all. With one group per call no prompt
+  comes near it, yet a report past it still loses samples.
 
 ## Security
 
@@ -92,24 +119,26 @@ These are the seams it would build on, and what each next step needs.
   system is a new implementation and a bean; nothing downstream changes.
 - `FailureReport`: the deterministic facts, independent of the model. It is what a
   scheduler would persist and diff.
-- `Triager`: report in, verdict out (`TriageAnswer` plus `ModelOutcome`). A different model,
-  per-group calls or a second checking pass all fit behind it.
+- `Triager`: report in, verdict out (`TriageAnswer` plus `ModelOutcome`). Per-group calls
+  and the guards already sit behind it; a different model or a second checking pass would
+  too.
 - `LatestTriageHolder`: one slot today. It is where a store would go.
 
 **The steps, in order:**
 
 1. **Persist and schedule.** A store for `TriageResult`, a scheduled trigger, and the report
-   kept even when the model fails. Cheap, and it gives the eval set above its data.
+   kept even when the model fails. Cheap, and it gives the eval set real cases.
 2. **Diff and alert.** Compare a report with the last one: a new group, a group growing
    faster than a threshold, a source going `UNAVAILABLE`. The diff is code; the model
    explains it. Alerting is a sink (chat, mail) behind its own interface.
-3. **An eval gate.** Before anything acts, score recorded runs against known causes, and
-   keep the score as a CI check for prompt or model changes.
+3. **An eval gate.** `EvalTest` runs in CI, but it gates the guards, not the model: its
+   answers are scripted. Before anything acts, score recorded live runs against known
+   causes, and keep a threshold as a check on prompt or model changes.
 4. **Write capability, last and separately designed** (ADR 0002). An ADMIN credential held
    apart from the read one; the model proposes an action, a person confirms it, and an audit
-   line records who confirmed what. The proposal must name its evidence, and the
-   deterministic flags above must run on it. Resend only after the cause is fixed, which is
-   a fact a person supplies, not one the model infers.
+   line records who confirmed what. The proposal must name evidence that `EvidenceCheck`
+   holds. Resend only after the cause is fixed, which is a fact a person supplies, not one
+   the model infers.
 
 Each step keeps ADR 0001's split: code decides what is gathered and what may happen, and the
 model explains.

@@ -2,6 +2,7 @@ package com.messaging.triage.source.np;
 
 import com.messaging.triage.source.Failure;
 import com.messaging.triage.source.FailureSource;
+import com.messaging.triage.triage.Untrusted;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,6 +29,8 @@ public class NotificationWorkerGatherer implements FailureSource {
   static final List<String> FAILURE_STATUSES = List.of("DEAD_LETTERED", "FAILED");
   static final String PARKED_MARKER = "parked on ";
   static final String NO_FAILED_ATTEMPT = "no failed attempt recorded";
+  /** notification-platform stores the key as varchar(128), so this cap never cuts a real one. */
+  static final int MAX_TEMPLATE_KEY_CHARS = 128;
 
   private final NotificationWorkerClient client;
   private final int pageSize;
@@ -110,11 +113,17 @@ public class NotificationWorkerGatherer implements FailureSource {
     return NO_FAILED_ATTEMPT;
   }
 
+  static String templateKey(String key) {
+    return Untrusted.neutralize(String.valueOf(key), MAX_TEMPLATE_KEY_CHARS);
+  }
+
   private static Failure toFailure(WorkerViews.Status status) {
     Map<String, String> dimensions = new LinkedHashMap<>();
     dimensions.put("channel", String.valueOf(status.channel()));
     Map<String, String> attributes = new LinkedHashMap<>();
-    attributes.put("templateKey", String.valueOf(status.templateKey()));
+    // The key is whatever the client sent: hidden characters and fence markers go, and it is
+    // capped. The model never sees it unless it is a plain identifier (ModelView).
+    attributes.put("templateKey", templateKey(status.templateKey()));
     attributes.put("status", String.valueOf(status.status()));
     // Tries only: the parked marker is an attempt row but not a try.
     long tries = status.attempts() == null ? 0

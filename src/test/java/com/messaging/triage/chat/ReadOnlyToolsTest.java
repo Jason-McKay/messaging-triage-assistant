@@ -98,7 +98,7 @@ class ReadOnlyToolsTest {
   void theTriagePromptCarriesNoTools() {
     ChatModel chatModel = answering("{}");
     Triager triager = new Triager(chatModel, "qwen3:8b",
-      new AnswerValidator(Validation.buildDefaultValidatorFactory().getValidator()), 300);
+      new AnswerValidator(Validation.buildDefaultValidatorFactory().getValidator()), 300, 2);
     FailureGroup group = new FailureGroup("MI-1", Map.of("queue", "DLQ"), "bad", 1, null, null, false, List.of());
     FailureReport report = new FailureReport(Instant.EPOCH, List.of(new SourceSection("message-inspector", "MI",
       SourceSection.Status.OK, null, Map.of(), 1, List.of(group))), List.of());

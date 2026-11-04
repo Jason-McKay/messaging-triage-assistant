@@ -1,7 +1,9 @@
 package com.messaging.triage.chat;
 
+import com.messaging.triage.guard.ActionGuard;
 import com.messaging.triage.source.mi.McpClientHolder;
 import com.messaging.triage.support.Problems;
+import com.messaging.triage.triage.DiagnosisFlag;
 import com.messaging.triage.triage.GroupDiagnosis;
 import com.messaging.triage.triage.LatestTriageHolder;
 import com.messaging.triage.triage.TriageAnswer;
@@ -13,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -39,6 +42,10 @@ import org.springframework.beans.factory.ObjectProvider;
  * Spring AI 2.0's {@code ChatModel.call} returns the model's tool calls unexecuted, so the
  * loop is here: a call runs only if its name is in this request's list, and any other name
  * is answered "no such tool" without running anything.
+ * <p>
+ * An answer from the model that advises a change to message state ends with
+ * {@link ActionGuard#WARNING} and carries the flag (ADR 0005). Replies code writes itself,
+ * such as "Stopped: ...", are not scanned.
  */
 @Slf4j
 public class ChatService {
@@ -132,9 +139,16 @@ public class ChatService {
     String answer = response == null || response.getResult() == null || response.getResult().getOutput() == null
       ? null : response.getResult().getOutput().getText();
     answer = answer == null ? "" : THINK_BLOCK.matcher(answer).replaceAll("").strip();
+    List<String> flags = List.of();
+    // The model's wording is never taken as the safe version (ADR 0005).
+    if (ActionGuard.recommendsStateChange(answer)) {
+      log.info("chat: the answer advises a change to message state; warning added");
+      answer = answer + "\n\n" + ActionGuard.WARNING;
+      flags = List.of(DiagnosisFlag.RECOMMENDS_STATE_CHANGE.name());
+    }
     long durationMs = (System.nanoTime() - started) / 1_000_000;
     log.info("chat: {} tool calls, answered in {} ms", calls.names().size(), durationMs);
-    return new ChatReply(answer, calls.names(), model, durationMs);
+    return new ChatReply(answer, calls.names(), model, durationMs, flags);
   }
 
   List<ToolCallback> tools(RecordingToolCallback.Calls calls, List<String> unavailable) {
@@ -221,7 +235,12 @@ public class ChatService {
     }
     StringBuilder text = new StringBuilder(answer.summary());
     for (GroupDiagnosis diagnosis : answer.diagnoses()) {
-      text.append(" | ").append(diagnosis.groupId()).append(": ").append(diagnosis.probableCause());
+      text.append(" | ").append(diagnosis.groupId());
+      if (!diagnosis.flags().isEmpty()) {
+        text.append(" (flagged ").append(diagnosis.flags().stream().map(Enum::name).collect(Collectors.joining(", ")))
+          .append(')');
+      }
+      text.append(": ").append(diagnosis.probableCause());
     }
     return text.toString();
   }
