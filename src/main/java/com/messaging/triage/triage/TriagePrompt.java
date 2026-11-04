@@ -101,6 +101,19 @@ public class TriagePrompt {
       + "No other text.");
   }
 
+  /**
+   * The second try for an answer that repeats another group's: which field, and that group's
+   * words, fenced, since the model wrote them from data the systems sent. The answer itself
+   * goes before it.
+   */
+  public UserMessage conflict(String otherId, String field, String otherText) {
+    return new UserMessage("Your " + referenceOf(field) + " repeats the one given for group " + referenceOf(otherId)
+      + ", which failed with a different error:\n" + Untrusted.wrap("other-diagnosis", otherText, maxValueChars)
+      + "\nThe same words are unlikely to fit both. Base your answer on this group's own error and samples, "
+      + "and answer again for this one group with a single JSON object matching the schema in the instructions. "
+      + "No other text.");
+  }
+
   /** Notes start with their source's id; one that starts with no source's id is the report's. */
   private static List<String> notesFor(FailureReport report, SourceSection section) {
     List<String> prefixes = report.sources().stream().map(source -> source.id() + ": ").toList();

@@ -37,6 +37,12 @@ class TriagerTest {
 
   private static final Instant T0 = Instant.parse("2026-11-03T10:00:00Z");
   private static final String MODEL = "qwen3:8b";
+  private static final String MISSING_KEY = "no template configured for key order-refunded";
+  private static final String MISSING_VARIABLE =
+    "template order-shipped needs variable orderId, which the payload does not carry";
+  private static final String COPIED = "The payload does not carry orderId.";
+  private static final String MI_ANSWER = answer("The message has no address.", "Ask the sender to add the address.",
+    "Missing required field");
 
   private final ScriptedChatModel chatModel = new ScriptedChatModel();
   private final Triager triager = triager(chatModel, 2);
@@ -226,6 +232,105 @@ class TriagerTest {
   }
 
   @Test
+  void aCauseCopiedAcrossDifferentErrorsSendsBothBackShownTheOther() {
+    // v1's defect: the missing-orderId cause also landed on the missing-template group.
+    chatModel.answer("NP-1", answer(COPIED, "Add orderId to the payload.", "order-refunded"),
+        answer("No template is configured for order-refunded.", "Add the template.", "order-refunded"))
+      .answer("NP-2", answer(COPIED, "Add orderId to the payload.", "needs variable orderId"),
+        answer(COPIED, "Add orderId to the payload.", "needs variable orderId"))
+      .answer("MI-1", MI_ANSWER);
+
+    Triager.Verdict verdict = triager.triage(differing());
+
+    assertThat(verdict.answer().diagnoses()).extracting(GroupDiagnosis::groupId, GroupDiagnosis::probableCause)
+      .containsExactly(tuple("NP-1", "No template is configured for order-refunded."), tuple("NP-2", COPIED),
+        tuple("MI-1", "The message has no address."));
+    assertThat(verdict.outcome().groups())
+      .extracting(GroupOutcome::groupId, GroupOutcome::status, GroupOutcome::attempts, GroupOutcome::problem)
+      .containsExactly(
+        tuple("NP-1", GroupOutcome.Status.REPAIRED, 2, "probableCause repeats NP-2's, which failed differently"),
+        tuple("NP-2", GroupOutcome.Status.REPAIRED, 2, "probableCause repeats NP-1's, which failed differently"),
+        tuple("MI-1", GroupOutcome.Status.OK, 1, null));
+    assertThat(verdict.outcome().attempts()).isEqualTo(5);
+    assertThat(verdict.outcome().note()).isEqualTo("repaired on the second try: NP-1, NP-2");
+
+    Prompt again = chatModel.prompts("NP-1").get(1);
+    assertThat(again.getInstructions()).extracting(message -> message.getMessageType())
+      .containsExactly(MessageType.SYSTEM, MessageType.USER, MessageType.ASSISTANT, MessageType.USER);
+    assertThat(again.getInstructions().get(2).getText()).contains(COPIED);
+    assertThat(again.getInstructions().get(3).getText())
+      .startsWith("Your probableCause repeats the one given for group NP-2")
+      .contains(Untrusted.wrap("other-diagnosis", COPIED, 300));
+  }
+
+  @Test
+  void aCopyStillThereWhenAskedAgainIsUnusableRatherThanKept() {
+    String copy = answer(COPIED, "Add orderId to the payload.", "Template");
+    chatModel.answer("NP-1", copy, copy).answer("NP-2", copy, copy).answer("MI-1", MI_ANSWER);
+
+    Triager.Verdict verdict = triager.triage(differing());
+
+    assertThat(verdict.outcome().usable()).isTrue();
+    assertThat(verdict.answer().diagnoses()).extracting(GroupDiagnosis::groupId).containsExactly("MI-1");
+    assertThat(verdict.outcome().groups()).extracting(GroupOutcome::status, GroupOutcome::attempts)
+      .containsExactly(tuple(GroupOutcome.Status.UNUSABLE, 2), tuple(GroupOutcome.Status.UNUSABLE, 2),
+        tuple(GroupOutcome.Status.OK, 1));
+    assertThat(verdict.outcome().groups().getFirst().problem()).isEqualTo(
+      "probableCause repeats NP-2's, which failed differently; asked again, its probableCause repeats NP-2's");
+    assertThat(verdict.outcome().note()).isEqualTo("no usable diagnosis for NP-1, NP-2");
+    assertThat(verdict.answer().summary()).endsWith("No usable diagnosis for NP-1, NP-2.");
+  }
+
+  @Test
+  void aRepeatWithNoCallLeftIsUnusableAtOnceAndTheOtherIsAskedAgain() {
+    String copy = answer(COPIED, "Add orderId to the payload.", "Template");
+    chatModel.answer("NP-1", "not json", copy).answer("NP-2", copy, copy).answer("MI-1", MI_ANSWER);
+
+    Triager.Verdict verdict = triager.triage(differing());
+
+    // NP-1 spent its repair on its shape. NP-2, asked again, kept its cause; with NP-1 gone
+    // nothing repeats it, so it stands.
+    assertThat(verdict.answer().diagnoses()).extracting(GroupDiagnosis::groupId).containsExactly("NP-2", "MI-1");
+    GroupOutcome np1 = verdict.outcome().groups().getFirst();
+    assertThat(np1.status()).isEqualTo(GroupOutcome.Status.UNUSABLE);
+    assertThat(np1.attempts()).isEqualTo(2);
+    assertThat(np1.problem())
+      .isEqualTo("probableCause repeats NP-2's, which failed differently, and no call was left to ask again");
+    assertThat(verdict.outcome().groups().get(1))
+      .extracting(GroupOutcome::status, GroupOutcome::attempts).containsExactly(GroupOutcome.Status.REPAIRED, 2);
+    assertThat(chatModel.prompts("NP-1")).hasSize(2);
+  }
+
+  @Test
+  void theSameCauseForTheSameErrorIsKeptWithoutAskingAgain() {
+    // Repeats count only across different errors: one missing template on two channels has one cause.
+    FailureGroup email = group("NP-1", MISSING_KEY);
+    FailureGroup push = new FailureGroup("NP-2", Map.of("channel", "PUSH"), MISSING_KEY, 1, T0, T0, false,
+      List.of());
+    String same = answer("No template is configured for order-refunded.", "Add the template.", "order-refunded");
+    chatModel.answer("NP-1", same).answer("NP-2", same);
+
+    Triager.Verdict verdict = triager.triage(new FailureReport(T0, List.of(new SourceSection("notification-platform",
+      "NP", SourceSection.Status.OK, null, Map.of(), 2, List.of(email, push))), List.of()));
+
+    assertThat(verdict.outcome().groups()).extracting(GroupOutcome::status, GroupOutcome::attempts)
+      .containsExactly(tuple(GroupOutcome.Status.OK, 1), tuple(GroupOutcome.Status.OK, 1));
+  }
+
+  @Test
+  void aModelThatFailsWhenAskedAgainMakesTheWholeTriageUnavailable() {
+    String copy = answer(COPIED, "Add orderId to the payload.", "Template");
+    chatModel.answer("NP-1", copy, copy).answer("NP-2", copy)
+      .fail("NP-2", new ResourceAccessException("Read timed out")).answer("MI-1", MI_ANSWER);
+
+    Triager.Verdict verdict = triager.triage(differing());
+
+    assertThat(verdict.answer()).isNull();
+    assertThat(verdict.outcome().usable()).isFalse();
+    assertThat(verdict.outcome().problem()).isEqualTo("model unavailable: ResourceAccessException: Read timed out");
+  }
+
+  @Test
   void blankFieldsAreRefused() {
     String blankCause = valid("The template is missing.").replace("\"The template is missing.\"", "\" \"");
     String noChecks = valid("The template is missing.").replace(",\"whatToCheck\":[\"the template store\"]", "");
@@ -390,6 +495,31 @@ class TriagerTest {
       quotes.add(quote);
     }
     return answer.toString();
+  }
+
+  /** An answer with a next step of its own, so only what a test means to repeat does. */
+  static String answer(String cause, String nextStep, String evidence) {
+    ObjectNode answer = JsonMapper.shared().createObjectNode()
+      .put("probableCause", cause)
+      .put("confidence", "MEDIUM")
+      .put("suggestedNextStep", nextStep);
+    answer.putArray("whatToCheck").add("the sender");
+    answer.putArray("evidence").add(evidence);
+    return answer.toString();
+  }
+
+  /** Two notification-platform groups that failed differently, and one from message-inspector. */
+  private static FailureReport differing() {
+    List<FailureGroup> np = List.of(group("NP-1", MISSING_KEY), group("NP-2", MISSING_VARIABLE));
+    List<FailureGroup> mi = List.of(group("MI-1", "Missing required field: address"));
+    return new FailureReport(T0, List.of(
+      new SourceSection("notification-platform", "NP", SourceSection.Status.OK, null, Map.of(), 2, np),
+      new SourceSection("message-inspector", "MI", SourceSection.Status.OK, null, Map.of(), 1, mi)),
+      List.of());
+  }
+
+  private static FailureGroup group(String id, String error) {
+    return new FailureGroup(id, Map.of("channel", "EMAIL"), error, 1, T0, T0, false, List.of());
   }
 
   private static FailureReport report(String... groupIds) {

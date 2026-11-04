@@ -1,11 +1,13 @@
 package com.messaging.triage.triage;
 
 import com.messaging.triage.guard.EvidenceCheck;
+import com.messaging.triage.guard.RepeatedDiagnosisCheck;
 import com.messaging.triage.report.FailureGroup;
 import com.messaging.triage.report.FailureReport;
 import com.messaging.triage.source.SourceSection;
 import com.messaging.triage.support.Problems;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -13,7 +15,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -36,6 +40,9 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>Think blocks and code fences stripped, then parsed and checked ({@link AnswerValidator}).</li>
  *   <li>If that fails, one repair call for that group that shows the model its answer and
  *       what was wrong.</li>
+ *   <li>A diagnosis repeated across groups that failed differently sends each of them back
+ *       once, shown the other's words; one that still repeats, or has no call left, is
+ *       unusable rather than kept as a copy (ADR 0005).</li>
  *   <li>Each usable answer is checked in code: its evidence must be in its group's own data,
  *       or it is flagged and its confidence capped (ADR 0005).</li>
  *   <li>The answer is assembled in code: each diagnosis under the id of the group it was
@@ -98,10 +105,10 @@ public class Triager {
     AtomicReference<RuntimeException> failure = new AtomicReference<>();
     long started = System.nanoTime();
     try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      runs.stream()
-        .map(run -> CompletableFuture.runAsync(() -> diagnose(run, failure), executor))
-        .toList()
-        .forEach(CompletableFuture::join);
+      runAll(runs, run -> diagnose(run, failure), executor);
+      if (failure.get() == null) {
+        separateRepeats(runs, failure, executor);
+      }
     }
     long durationMs = elapsedMs(started);
 
@@ -137,6 +144,7 @@ public class Triager {
     Parsed parsed = parse(first);
     if (parsed.usable()) {
       run.answer = parsed.answer();
+      run.raw = first;
       return;
     }
     log.info("triage {}: first answer unusable ({} problems); asking once more", run.group.id(),
@@ -150,9 +158,86 @@ public class Triager {
     }
     Parsed repaired = parse(second);
     run.answer = repaired.answer();
+    run.raw = second;
     if (!repaired.usable()) {
       run.problems = repaired.problems();
     }
+  }
+
+  /**
+   * A diagnosis repeated across groups that failed differently is a problem with both, since
+   * which one was copied is not known (ADR 0005). Each group in a repeat is asked once more,
+   * shown the other's words, if it has a call left; one with none is unusable at once. A group
+   * asked again that still repeats another is unusable too, so the copy is never kept.
+   */
+  private void separateRepeats(List<GroupRun> runs, AtomicReference<RuntimeException> failure,
+    ExecutorService executor) {
+    List<RepeatedDiagnosisCheck.Repeat> repeats = RepeatedDiagnosisCheck.find(diagnosed(runs));
+    if (repeats.isEmpty()) {
+      return;
+    }
+    Map<String, GroupRun> byId = new HashMap<>();
+    runs.forEach(run -> byId.put(run.group.id(), run));
+    List<GroupRun> asked = new ArrayList<>();
+    for (RepeatedDiagnosisCheck.Repeat repeat : repeats) {
+      GroupRun run = byId.get(repeat.id());
+      String problem = repeat.field() + " repeats " + repeat.otherId() + "'s, which failed differently";
+      if (run.attempts > 1) {
+        log.info("triage {}: {} repeats {}'s, with no call left", run.group.id(), repeat.field(), repeat.otherId());
+        run.reject(problem + ", and no call was left to ask again");
+      } else {
+        run.repeat = repeat;
+        run.problems = List.of(problem);
+        asked.add(run);
+      }
+    }
+    runAll(asked, run -> reconsider(run, failure), executor);
+    if (failure.get() != null) {
+      return;
+    }
+    for (RepeatedDiagnosisCheck.Repeat repeat : RepeatedDiagnosisCheck.find(diagnosed(runs))) {
+      GroupRun run = byId.get(repeat.id());
+      if (run.repeat != null) {
+        log.info("triage {}: {} still repeats {}'s", run.group.id(), repeat.field(), repeat.otherId());
+        run.reject(String.join("; ", run.problems) + "; asked again, its " + repeat.field() + " repeats "
+          + repeat.otherId() + "'s");
+      }
+    }
+  }
+
+  /** The one repair for an answer that repeats another group's. */
+  private void reconsider(GroupRun run, AtomicReference<RuntimeException> failure) {
+    log.info("triage {}: {} repeats {}'s; asking once more", run.group.id(), run.repeat.field(),
+      run.repeat.otherId());
+    run.messages.add(new AssistantMessage(Problems.cap(run.raw, MAX_ECHOED_ANSWER_CHARS)));
+    run.messages.add(prompt.conflict(run.repeat.otherId(), run.repeat.field(), run.repeat.otherText()));
+    run.answer = null;
+    String again = call(run, failure);
+    if (again == null) {
+      return;
+    }
+    Parsed parsed = parse(again);
+    run.answer = parsed.answer();
+    run.raw = again;
+    if (!parsed.usable()) {
+      run.problems = Stream.concat(run.problems.stream(), parsed.problems().stream()).toList();
+    }
+  }
+
+  /** The groups with an answer, as the repeat check compares them: by the error the model was shown. */
+  private static List<RepeatedDiagnosisCheck.Diagnosis> diagnosed(List<GroupRun> runs) {
+    return runs.stream()
+      .filter(run -> run.answer != null)
+      .map(run -> new RepeatedDiagnosisCheck.Diagnosis(run.group.id(), run.answer.probableCause(),
+        run.answer.suggestedNextStep(), ModelView.group(run.group).error(), run.group.merged()))
+      .toList();
+  }
+
+  private static void runAll(List<GroupRun> runs, Consumer<GroupRun> task, ExecutorService executor) {
+    runs.stream()
+      .map(run -> CompletableFuture.runAsync(() -> task.accept(run), executor))
+      .toList()
+      .forEach(CompletableFuture::join);
   }
 
   /**
@@ -269,7 +354,7 @@ public class Triager {
     return (System.nanoTime() - started) / 1_000_000;
   }
 
-  /** One group's calls. Only its own task touches it until the join, which orders what follows. */
+  /** One group's calls. Only its own task touches it while its calls run; each join orders what follows. */
   private static final class GroupRun {
 
     final FailureReport report;
@@ -281,11 +366,21 @@ public class Triager {
     GroupAnswer answer;
     List<String> problems = List.of();
     RuntimeException failure;
+    /** The text of the answer kept, to show the model when it is asked again. */
+    String raw;
+    /** Set when this group was asked again because its diagnosis repeated another's. */
+    RepeatedDiagnosisCheck.Repeat repeat;
 
     GroupRun(FailureReport report, SourceSection section, FailureGroup group) {
       this.report = report;
       this.section = section;
       this.group = group;
+    }
+
+    /** No usable answer after all, for this reason, which replaces any earlier ones. */
+    void reject(String problem) {
+      answer = null;
+      problems = List.of(problem);
     }
 
     GroupOutcome outcome() {
