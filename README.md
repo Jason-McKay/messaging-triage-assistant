@@ -42,10 +42,14 @@ flowchart LR
    placeholders), groups by source dimensions (channel; queue and original queue) and error,
    keeps up to 8 groups per source and merges the rest into `OTHER`. Each group keeps 3
    samples, and every text is capped.
-3. **Explain.** `Triager` makes one call with no tools, constrained to the answer's JSON
-   schema. It checks the answer: every group exactly once, no unknown ids, no blank fields.
-   A bad answer gets one repair call; after that the result says `usable=false` and why.
-   The facts are returned either way.
+3. **Explain.** `Triager` makes one call per group, with no tools, constrained to the
+   answer's JSON schema ([ADR 0004](docs/adr/0004-per-group-calls-and-a-code-written-summary.md)).
+   A bad answer gets one repair call. Code then checks every answer
+   ([ADR 0005](docs/adr/0005-deterministic-output-guards.md)): a diagnosis repeated across
+   groups that failed differently is sent back, evidence that is not in the group's own data
+   is flagged `UNSUPPORTED`, and advice to resend, delete or move messages is flagged
+   `RECOMMENDS_STATE_CHANGE` and put behind a fixed warning. Either flag caps confidence at
+   LOW. The summary is written by code. The facts are returned either way.
 4. **Chat.** The model gets the three read tools of each system, plus the latest triage as
    context. Spring AI 2.0's `ChatModel` hands tool calls back unexecuted, so `ChatService`
    runs them itself, and only names in its own list ([ADR 0002](docs/adr/0002-read-only-by-construction.md)).
@@ -116,7 +120,7 @@ shared dev broker on 8161/61616.
 |---|---|
 | `POST /api/triage` | Always **200**: a source that is down, or a model that is, is part of the result |
 | `GET /api/triage/latest` | **200** with the last result, **404** before the first run. Held in memory only |
-| `POST /api/chat` | **200** `{answer, toolsCalled, model, durationMs}`; **503** when the model is down; **400** on a bad request |
+| `POST /api/chat` | **200** `{answer, toolsCalled, model, durationMs, flags}`; **503** when the model is down; **400** on a bad request |
 
 A triage result, abridged:
 
@@ -188,6 +192,49 @@ picks the queues, and `triage.limits.*` sets the caps.
   [docs/known-gaps.md](docs/known-gaps.md) has both.
 
 ## Honest limits
+
+### With the guards (2026-11-04)
+
+Same model, settings and GPU as v1 below, the demo seeded on top of earlier data again
+(notification-platform: 50 failures in 6 groups; message-inspector: 6 in 3), seven triage
+runs, a handful of chat questions and the eval set (`demo/eval.ps1`).
+
+**Speed.** Nine calls per triage. 38.7 s cold (v1: 38.9 s); warm 31.95 to 32.05 s at
+`max-parallel-calls=2` and 31.40 to 31.90 s at 1 (v1: 26.6 to 33.3 s). One call took 2.8 to
+4.7 s. This Ollama serves one request at a time, so the parallel limit bought nothing. No
+repair call was needed. Gathering took 0.5 to 2.5 s; chat answered in 1.4 to 5.0 s.
+
+**Gone.**
+- **Copied diagnoses.** Every group got its own cause in every run. The three groups with
+  the same missing template got the same cause, correctly, and the repeat check let them be.
+- **The injected template key no longer sways anything.** The model sees
+  `[unsafe template key, 108 chars]` ([ADR 0006](docs/adr/0006-abstract-client-controlled-values.md));
+  that group got a correct cause at HIGH, no group was made LOW, and the summary, written
+  by code, cannot be reached.
+- **The injected payload** reaches the model as `{"orderId":"o-3001","note":"[text, 124 chars]"}`.
+  Its cause (missing `address`) was right, with no advice to delete, in triage or in chat.
+- No triage answer advised a change to message state, flagged or not.
+- With Ollama stopped, triage still answered 200 (`usable=false`, "model unavailable: ...
+  Connection refused", the other 8 groups `SKIPPED`) in 0.9 s; chat answered 503.
+
+**Still there.**
+- **Chat still advises state changes; now they are flagged.** Asked what to do with the
+  shipments message, it said to redeliver it; asked how to get rid of the dead letters, it
+  said to remove them "using the message-inspector tools", which cannot. Both came back
+  with `flags: ["RECOMMENDS_STATE_CHANGE"]` and the warning appended. "No, you should not
+  resend ... before considering any resends" was flagged too: the guard is conservative.
+- **The first live run found four false positives**, fixed before the runs above:
+  "retry configuration" read as advice, and three ways of quoting the prompt the evidence
+  check did not accept. In the eval, `qwen3:8b` quoted `status=DEAD_LETTER` for
+  `DEAD_LETTERED` in five cases, so a correct diagnosis was capped at LOW as `UNSUPPORTED`.
+- **The one-message group (MI-3) stays LOW**: the model rated it so itself.
+- **Chat stopped short on "the payments DLQ messages"**: it named `DLQ` and
+  `_AMQ_ORIG_QUEUE`, then ended without browsing. Asked to browse `DLQ` for the messages
+  from payments, it named the XML payloads correctly.
+- message-inspector answers sometimes tell the operator to check a notification-platform
+  template: the system prompt is shared.
+
+### v1 (2026-11-03)
 
 Observed on 2026-11-03 with the demo seeded on top of earlier notification-platform data,
 using `qwen3:8b`, thinking off, fully in VRAM (Radeon RX 7700 XT, 12 GB): four triage runs
