@@ -15,7 +15,9 @@ import org.springframework.ai.chat.messages.UserMessage;
  * The words the model sees for a triage. The system message holds everything fixed (role,
  * rules, schema); the user message holds the report, with every value that came from the
  * systems fenced as untrusted (ADR 0003). Ids, counts and times are typed and rendered by
- * this class, so they are left bare; references are cut down to an id's characters.
+ * this class, so they are left bare; references are cut down to an id's characters. Each
+ * group is shown as {@link ModelView} abstracts it, so a value a client chose reaches the
+ * model as a placeholder rather than as words (ADR 0006).
  */
 public class TriagePrompt {
 
@@ -103,7 +105,7 @@ public class TriagePrompt {
     if (section.groups().isEmpty()) {
       text.append("No failure groups.\n");
     }
-    section.groups().forEach(group -> appendGroup(text, group));
+    section.groups().forEach(group -> appendGroup(text, ModelView.group(group)));
   }
 
   private void appendGroup(StringBuilder text, FailureGroup group) {

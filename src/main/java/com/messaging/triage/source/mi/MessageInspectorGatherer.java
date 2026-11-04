@@ -30,7 +30,7 @@ public class MessageInspectorGatherer implements FailureSource {
 
   static final String ORIG_QUEUE = "_AMQ_ORIG_QUEUE";
   static final String ORIG_ADDRESS = "_AMQ_ORIG_ADDRESS";
-  static final String UNKNOWN_ORIGIN = "unknown origin";
+  public static final String UNKNOWN_ORIGIN = "unknown origin";
   static final String NO_RECORDED_REASON = "no recorded reason";
 
   private final MessageInspectorClient client;
