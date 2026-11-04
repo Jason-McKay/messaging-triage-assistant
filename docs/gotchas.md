@@ -33,6 +33,12 @@ Most of these cost real time on the way in.
 - **message-inspector's MCP previews payloads at 500 characters.** A JSON payload cut there
   does not parse, so its top-level keys are empty and sample selection treats it as
   shapeless.
+- **This Ollama serves one request at a time.** Its server log shows `OLLAMA_NUM_PARALLEL:1`,
+  so at `triage.limits.max-parallel-calls=2` the second call waits inside Ollama: warm
+  triages took the same time at 1 and at 2 (ADR 0004). The wait is invisible to the app. It
+  counts in the group's `durationMs`, which leaves out only the wait for the app's own slot,
+  and in the call's read timeout, since the request has been sent. More slots in Ollama
+  each take their own context memory.
 
 ## Boot 4
 
@@ -78,3 +84,6 @@ Most of these cost real time on the way in.
   Check with `grep -nP '[^\x00-\x7F]' demo/*.ps1`.
 - **Git Bash rewrites absolute paths** in arguments to native programs, `docker exec` among
   them; prefix `MSYS_NO_PATHCONV=1` if you exec into a demo container.
+- **Quote `-D` arguments in Windows PowerShell.** It splits `-Deval.parallel=1` at the dot
+  before Maven sees it. `demo/eval.ps1` quotes its own, and extra ones need quotes too:
+  `demo/eval.ps1 '-Deval.parallel=1'`.
