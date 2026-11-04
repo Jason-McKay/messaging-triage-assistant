@@ -28,7 +28,7 @@ flowchart LR
   RB -- "GET, bearer token" --> NPW["notification-platform<br/>worker :8081"]
   RB -- "MCP: list_queues,<br/>browse_messages" --> MI["message-inspector<br/>:8082 /mcp"]
   MI -- JMS --> AR[("Artemis")]
-  TR -- "one call, no tools,<br/>JSON schema" --> OL["Ollama<br/>qwen3:8b :11434"]
+  TR -- "one call per group,<br/>no tools, JSON schema" --> OL["Ollama<br/>qwen3:8b :11434"]
   CS <-- "tool calls" --> OL
   CS --> NPW
   CS --> MI
@@ -142,16 +142,30 @@ A triage result, abridged:
     "truncation": ["NP: detail read for 50 of 61 notifications (limit 50); the other 11 are counted above but in no group"]
   },
   "answer": {
-    "summary": "...",
+    "summary": "notification-platform: 50 failures in 6 groups; the largest is NP-1 with 11. message-inspector: ...",
     "diagnoses": [{"groupId": "MI-2", "probableCause": "...", "confidence": "HIGH",
-                   "suggestedNextStep": "...", "whatToCheck": ["..."]}]
+                   "suggestedNextStep": "...", "whatToCheck": ["..."],
+                   "evidence": ["JSON parse error: Unexpected character ('<' (code 60)) ...",
+                                "<payment><id>p-4002</id>..."],
+                   "flags": []}]
   },
-  "model": {"usable": true, "model": "qwen3:8b", "problem": null, "note": null, "attempts": 1, "durationMs": 26603}
+  "model": {"usable": true, "model": "qwen3:8b", "problem": null, "note": null, "attempts": 9, "durationMs": 31404,
+            "groups": [{"groupId": "MI-2", "status": "OK", "attempts": 1, "durationMs": 4674, "problem": null}]}
 }
 ```
 
 `answer` is `null` when `model.usable` is false. `model.problem` then says why: "model
-unavailable: ..." when the call failed, or the validation problems after the repair.
+unavailable: ..." when a call failed (the groups not yet asked are `SKIPPED`), or "model
+answer unusable: ..." with each group's problem when no group had a usable answer. When
+only some groups did, the answer is partial: it holds those, the others are named in
+`summary` and `model.note`, and each group's status (`OK`, `REPAIRED`, `UNUSABLE`, `SKIPPED`)
+and problem are in `model.groups`. `attempts` counts every call, and `durationMs` is the
+whole triage's.
+
+A diagnosis keeps only the `evidence` its group's data holds. `flags` are set by code, never
+by the model: `UNSUPPORTED` when the evidence is missing or made up, and
+`RECOMMENDS_STATE_CHANGE` when it advises resending, deleting or moving messages, which also
+puts a fixed warning in front of `suggestedNextStep`. Either caps `confidence` at `LOW`.
 
 A chat request is `{"message": "...", "history": [{"role": "user|assistant", "text": "..."}]}`.
 The server keeps no conversation; the last 10 turns of `history` are used.
@@ -279,19 +293,24 @@ answer took 3 to 10 s, tool calls included.
   group's error reads `Unexpected character ('<value>' ...)`. The `<` that says "XML" survives
   only in the sample's raw error and payload.
 
-The mitigations considered and not built are in [docs/known-gaps.md](docs/known-gaps.md).
+What is still open is in [docs/known-gaps.md](docs/known-gaps.md).
 
 ## Development
 
 ```bash
-./mvnw test                  # unit tests
+./mvnw test                  # unit tests, and the eval set with scripted answers
 ./mvnw clean verify          # plus OllamaDownIT; what CI runs
+./mvnw test -Dtest=EvalTest  # the eval set alone: table in target/eval/scripted-results.md
+demo/eval.sh                 # the eval set against the live model: needs only Ollama
 ```
 
 No test needs Ollama, Docker or the sibling apps ([docs/testing.md](docs/testing.md)).
-`security.yml` runs OWASP Dependency-Check weekly and on demand.
+The eval set (`src/test/resources/eval/`) is the seeded demo, both injections and a case
+for each guard. `demo/eval` prints its table and leaves every answer in
+`target/eval/live-results.md`, which `clean` deletes. `security.yml` runs OWASP
+Dependency-Check weekly and on demand.
 
 - [docs/adr/](docs/adr/README.md): the design decisions
 - [docs/gotchas.md](docs/gotchas.md): what cost time on the way in
 - [docs/testing.md](docs/testing.md): what each test pins
-- [docs/known-gaps.md](docs/known-gaps.md): what v1 does not do, and the way toward an incident agent
+- [docs/known-gaps.md](docs/known-gaps.md): what is still open, and the way toward an incident agent
