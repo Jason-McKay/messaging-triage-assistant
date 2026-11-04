@@ -1,17 +1,10 @@
 package com.messaging.triage.triage;
 
-import com.fasterxml.jackson.annotation.JsonPropertyDescription;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import java.util.List;
 
-/** What the model must answer: a summary and one diagnosis for every group, no more. */
-public record TriageAnswer(
-  @JsonPropertyDescription("Two or three sentences on the state of both systems: what is failing, how much, "
-    + "and which group matters most.")
-  @NotBlank String summary,
-
-  @JsonPropertyDescription("Exactly one entry per group id in the report.")
-  @NotNull List<@NotNull @Valid GroupDiagnosis> diagnoses) {
+/**
+ * What a triage returns: a summary that code writes from the report's ids and counts, and a
+ * diagnosis for each group the model answered usably, in report order (ADR 0004).
+ */
+public record TriageAnswer(String summary, List<GroupDiagnosis> diagnoses) {
 }

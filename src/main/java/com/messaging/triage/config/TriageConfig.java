@@ -41,7 +41,8 @@ public class TriageConfig {
 
   @Bean
   Triager triager(ChatModel chatModel, TriageProperties properties, AnswerValidator validator) {
-    return new Triager(chatModel, properties.model(), validator, properties.limits().maxTextChars());
+    return new Triager(chatModel, properties.model(), validator, properties.limits().maxTextChars(),
+      properties.limits().maxParallelCalls());
   }
 
   @Bean

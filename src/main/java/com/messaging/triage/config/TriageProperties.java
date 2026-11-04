@@ -72,7 +72,8 @@ public record TriageProperties(
     @Min(20) int maxTextChars,
     @Min(0) int maxDetailFetches,
     @Min(1) @Max(100) int pageSize,
-    @Min(1000) int promptBudgetChars) {
+    @Min(1000) int promptBudgetChars,
+    @Min(1) int maxParallelCalls) {
   }
 
   public record Chat(
