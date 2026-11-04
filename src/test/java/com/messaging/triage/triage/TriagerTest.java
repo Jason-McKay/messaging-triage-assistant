@@ -392,9 +392,10 @@ class TriagerTest {
     Triager.Verdict verdict = triager.triage(report("NP-1"));
 
     assertThat(verdict.outcome().usable()).isFalse();
-    assertThat(verdict.outcome().problem()).contains("whatToCheck must not be null");
+    // The field paths, not Hibernate Validator's wording, which follows the locale.
+    assertThat(verdict.outcome().problem()).contains("NP-1: whatToCheck ");
     assertThat(chatModel.prompts("NP-1").get(1).getInstructions().get(3).getText())
-      .contains("probableCause must not be blank");
+      .contains("could not be used: probableCause ");
   }
 
   @Test
