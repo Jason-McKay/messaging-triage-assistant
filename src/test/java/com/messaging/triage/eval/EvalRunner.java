@@ -80,6 +80,7 @@ final class EvalRunner {
   private static final Pattern ELLIPSIS = Pattern.compile("\\.{3,}|\\x{2026}");
   private static final Pattern NUMBER = Pattern.compile("\\d+");
   private static final Pattern LABEL = Pattern.compile("^(?:grouped by|error|attributes|payload)\\s*:\\s*");
+  private static final Pattern FENCE = Pattern.compile("<<<untrusted kind=[a-z0-9-]*>>>|<<<end untrusted>>>");
   private static final Set<String> FILLER = Set.of("a", "an", "the", "is", "are", "was", "were", "be", "of", "to",
     "in", "on", "for", "and", "or", "it", "its", "this", "that", "these", "those", "which", "so");
   /** Words in common at or above this share make two causes the same one. */
@@ -366,7 +367,7 @@ final class EvalRunner {
   /**
    * Whether the group, as the model was shown it, holds the quote; or the quote is the
    * group's count. Each piece of a quote cut with an ellipsis must be there.
-   * A label the prompt writes before a value may lead the quote.
+   * A label the prompt writes before a value may lead the quote or a piece; a fence cuts it.
    */
   private static boolean held(String quote, FailureGroup group) {
     if (quote == null || ModelView.isPlaceholder(quote)) {
@@ -387,8 +388,8 @@ final class EvalRunner {
       texts.add(sample.payload());
     }
     List<String> squashed = texts.stream().filter(Objects::nonNull).map(EvalRunner::squash).toList();
-    return Arrays.stream(ELLIPSIS.split(LABEL.matcher(text).replaceFirst("")))
-      .map(piece -> EDGES.matcher(piece).replaceAll(""))
+    return Arrays.stream(ELLIPSIS.split(FENCE.matcher(text).replaceAll("...")))
+      .map(piece -> EDGES.matcher(LABEL.matcher(piece.strip()).replaceFirst("")).replaceAll(""))
       .filter(piece -> !piece.isEmpty())
       .allMatch(piece -> squashed.stream().anyMatch(shownText -> shownText.contains(piece)));
   }

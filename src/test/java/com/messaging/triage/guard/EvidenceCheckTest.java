@@ -98,6 +98,19 @@ class EvidenceCheckTest {
     assertThat(check("error: Connection refused").supported()).isFalse();
   }
 
+  @Test
+  void aFenceInAQuoteCutsItAndAddsNothing() {
+    // qwen3:8b copied the fence along with an XML payload in the live eval.
+    assertThat(check("payload: <<<UNTRUSTED kind=payload>>>Missing required field: address<<<END UNTRUSTED>>>")
+      .supported()).isTrue();
+    assertThat(check("<<<UNTRUSTED kind=dimensions>>>channel=EMAIL<<<END UNTRUSTED>>> Error: "
+      + "<<<UNTRUSTED kind=error>>>Template '<value>' not found<<<END UNTRUSTED>>>").supported())
+      .as("each fenced piece holds on its own").isTrue();
+    assertThat(check("<<<UNTRUSTED kind=error>>>Connection refused<<<END UNTRUSTED>>>").supported()).isFalse();
+    assertThat(check("<<<END UNTRUSTED>>> error: <<<UNTRUSTED kind=error>>>").supported())
+      .as("markup alone").isFalse();
+  }
+
   private static EvidenceCheck.Result check(String... evidence) {
     return EvidenceCheck.check(List.of(evidence), SHOWN, 1);
   }
