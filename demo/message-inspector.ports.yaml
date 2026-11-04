@@ -1,0 +1,12 @@
+# Applied on top of message-inspector's own compose.yaml by demo/up, so its stack runs beside
+# notification-platform (api :8080, worker :8081) and the shared infrastructure stack's
+# dev-artemis (:61616, :8161) without editing the sibling repo. !override replaces the
+# port lists instead of appending to them (Compose 2.24 or later).
+services:
+  app:
+    ports: !override
+      - "8082:8080"
+  artemis:
+    ports: !override
+      - "61617:61616"   # JMS
+      - "8162:8161"     # console and Jolokia (demo/seed writes through it)

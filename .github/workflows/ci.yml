@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # Unit tests (surefire) and OllamaDownIT (failsafe). Neither needs Ollama, Docker or
+      # the sibling apps: models, MCP clients and HTTP servers are mocked or stubbed.
+      - name: Build and test
+        run: ./mvnw -B clean verify

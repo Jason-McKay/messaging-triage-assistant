@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+
+  <!--
+    OWASP dependency-check suppressions.
+
+    A suppression is an assertion that a reported CVE does not apply to THIS application.
+    It is a security judgement, not a way to quiet the build, so every entry must record
+    who decided and why. An undocumented suppression is worse than the finding: it hides
+    a real risk behind the appearance of a clean report.
+
+    Only suppress after triage establishes one of:
+      1. FALSE POSITIVE  - dependency-check matched the wrong product or version.
+                           Check "CPE Confidence" in the report; LOW/MEDIUM is suspect.
+      2. NOT REACHABLE   - the vulnerable code path cannot be reached in this app, e.g.
+                           the feature is disabled, or the input is never attacker
+                           controlled. State the assumption, because assumptions expire.
+      3. NO FIX + ACCEPTED - no patched version exists and the risk is consciously taken.
+                           Prefer <until> so it comes back for review.
+
+    If a fixed version exists, upgrade instead. Do not suppress.
+
+    Regenerate the report with:  ./mvnw dependency-check:check -Dformat=ALL
+    The CSV output is the practical triage worklist.
+
+    ===========================================================================
+    2026-11-03: the first scan (dependency-check 13.0.0, Boot 4.1.2, Spring AI 2.0.2)
+    reported no findings at all, so there is nothing to suppress. The entries
+    message-inspector carries (log4j-api, swagger-ui, jackson-databind 2.x) are not
+    copied: none of their findings was reported here. Add an entry only after
+    triaging a finding this scan actually reports.
+    ===========================================================================
+  -->
+
+</suppressions>
