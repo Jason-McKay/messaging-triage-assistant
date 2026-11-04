@@ -79,6 +79,7 @@ final class EvalRunner {
   private static final Pattern EDGES = Pattern.compile("^[\\s.,;:!?()]+|[\\s.,;:!?()]+$");
   private static final Pattern ELLIPSIS = Pattern.compile("\\.{3,}|\\x{2026}");
   private static final Pattern NUMBER = Pattern.compile("\\d+");
+  private static final Pattern LABEL = Pattern.compile("^(?:grouped by|error|attributes|payload)\\s*:\\s*");
   private static final Set<String> FILLER = Set.of("a", "an", "the", "is", "are", "was", "were", "be", "of", "to",
     "in", "on", "for", "and", "or", "it", "its", "this", "that", "these", "those", "which", "so");
   /** Words in common at or above this share make two causes the same one. */
@@ -365,6 +366,7 @@ final class EvalRunner {
   /**
    * Whether the group, as the model was shown it, holds the quote; or the quote is the
    * group's count. Each piece of a quote cut with an ellipsis must be there.
+   * A label the prompt writes before a value may lead the quote.
    */
   private static boolean held(String quote, FailureGroup group) {
     if (quote == null || ModelView.isPlaceholder(quote)) {
@@ -376,15 +378,16 @@ final class EvalRunner {
       return true;
     }
     FailureGroup shown = ModelView.group(group);
-    List<String> texts = new ArrayList<>(shown.dimensions().values());
+    List<String> texts = new ArrayList<>();
+    texts.add(pairs(shown.dimensions()));
     texts.add(shown.error());
     for (Sample sample : shown.samples()) {
       texts.add(sample.error());
+      texts.add(pairs(sample.attributes()));
       texts.add(sample.payload());
-      texts.addAll(sample.attributes().values());
     }
     List<String> squashed = texts.stream().filter(Objects::nonNull).map(EvalRunner::squash).toList();
-    return Arrays.stream(ELLIPSIS.split(text))
+    return Arrays.stream(ELLIPSIS.split(LABEL.matcher(text).replaceFirst("")))
       .map(piece -> EDGES.matcher(piece).replaceAll(""))
       .filter(piece -> !piece.isEmpty())
       .allMatch(piece -> squashed.stream().anyMatch(shownText -> shownText.contains(piece)));
@@ -453,6 +456,13 @@ final class EvalRunner {
     return Arrays.stream(WORDS.split(lower(text)))
       .filter(word -> !word.isEmpty() && !FILLER.contains(word))
       .collect(Collectors.toSet());
+  }
+
+  /** As the prompt lists dimensions and attributes, on one line. */
+  private static String pairs(Map<String, String> values) {
+    return values.entrySet().stream()
+      .map(entry -> entry.getKey() + "=" + entry.getValue())
+      .collect(Collectors.joining(", "));
   }
 
   private static String squash(String text) {

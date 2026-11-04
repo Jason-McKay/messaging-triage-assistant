@@ -89,6 +89,15 @@ class EvidenceCheckTest {
     assertThat(check("channel=EMAIL Template").supported()).isFalse();
   }
 
+  @Test
+  void aLabelThePromptWritesMayLeadAQuote() {
+    // As qwen3:8b quoted in the guarded live run.
+    assertThat(check("payload: {\"orderId\":\"o-3001\",\"note\":\"[text, 124 chars]\"}").supported()).isTrue();
+    assertThat(check("Error: Missing required field: address").supported()).isTrue();
+    assertThat(check("payload: [text, 124 chars]").supported()).as("a label adds no letters").isFalse();
+    assertThat(check("error: Connection refused").supported()).isFalse();
+  }
+
   private static EvidenceCheck.Result check(String... evidence) {
     return EvidenceCheck.check(List.of(evidence), SHOWN, 1);
   }

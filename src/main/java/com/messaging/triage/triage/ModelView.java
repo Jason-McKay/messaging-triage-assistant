@@ -83,19 +83,20 @@ public final class ModelView {
   }
 
   /**
-   * The texts the model is shown for a group, squashed as the prompt shows them, for checking
-   * what it quotes as evidence: dimensions, the error, and each sample's error, payload and
-   * attributes. Times and references are left out; they say when and which, not why.
+   * The texts the model is shown for a group, one per line of the prompt and squashed as the
+   * prompt shows them, for checking what it quotes as evidence: the dimensions, the error, and
+   * each sample's error, attributes and payload. Times and references are left out; they say
+   * when and which, not why.
    */
   static List<String> shownTexts(FailureGroup group) {
     FailureGroup shown = group(group);
     List<String> texts = new ArrayList<>();
-    shown.dimensions().forEach((name, value) -> texts.add(name + "=" + value));
+    texts.add(TriagePrompt.pairs(shown.dimensions()));
     texts.add(shown.error());
     for (Sample sample : shown.samples()) {
       texts.add(sample.error());
+      texts.add(TriagePrompt.pairs(sample.attributes()));
       texts.add(sample.payload());
-      sample.attributes().forEach((name, value) -> texts.add(name + "=" + value));
     }
     return texts.stream().filter(Objects::nonNull).map(ModelView::squash).toList();
   }

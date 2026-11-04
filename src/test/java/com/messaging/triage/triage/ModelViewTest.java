@@ -90,6 +90,20 @@ class ModelViewTest {
   }
 
   @Test
+  void theShownTextsAreTheLinesThePromptWrites() {
+    // qwen3:8b quoted the attributes line whole in the guarded live run; it was not a shown text then.
+    String error = "no template configured for key order-refunded";
+    Map<String, String> attributes = new java.util.LinkedHashMap<>();
+    attributes.put("templateKey", "order-refunded");
+    attributes.put("tries", "3");
+    FailureGroup group = npGroup(error, new Sample("1b4e28ba-2fa1-11d2-883f-0016d3cca427", T0, error, null,
+      attributes));
+
+    assertThat(ModelView.shownTexts(group)).containsExactly(
+      "channel=PUSH", error, error, "templateKey=order-refunded, tries=3");
+  }
+
+  @Test
   void aJsonPayloadKeepsItsShapeAndLosesItsProse() {
     assertThat(ModelView.payload(INJECTED_PAYLOAD))
       .isEqualTo("{\"orderId\":\"o-3001\",\"note\":\"[text, 124 chars]\"}");

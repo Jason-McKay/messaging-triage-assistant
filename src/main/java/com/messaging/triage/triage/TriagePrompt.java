@@ -156,7 +156,7 @@ public class TriagePrompt {
     }
   }
 
-  private static String pairs(Map<String, String> values) {
+  static String pairs(Map<String, String> values) {
     return values.entrySet().stream()
       .map(entry -> entry.getKey() + "=" + entry.getValue())
       .collect(Collectors.joining(", "));

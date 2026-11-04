@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
  *   <li>A quote counts when, once normalized, every part of it (split at "...") occurs in one
  *       of the texts the model was shown for that group, and it holds at least
  *       {@value #MIN_LETTERS} letters or digits besides placeholders.</li>
+ *   <li>A label the prompt writes before a value ("error:", "payload:") may lead a quote, and
+ *       is not part of it: its letters do not count.</li>
  *   <li>A count counts when its one number is the group's count and its other words only say
  *       what was counted ("3 failures").</li>
  * </ul>
@@ -31,6 +33,8 @@ public final class EvidenceCheck {
   private static final Pattern EDGES = Pattern.compile("^[\\s.,;:!?()]+|[\\s.,;:!?()]+$");
   /** What the error normalizer and the model view write in place of values, once normalized. */
   private static final Pattern PLACEHOLDER = Pattern.compile("<[a-z]+>|\\[(?:unsafe [a-z ]+|text), \\d+ chars]");
+  /** The labels the prompt writes before the values of a group, once normalized. */
+  private static final Pattern LABEL = Pattern.compile("^(?:grouped by|error|attributes|payload)\\s*:\\s*");
   private static final Pattern NOT_ALPHANUMERIC = Pattern.compile("[^\\p{L}\\p{N}]+");
   private static final Pattern NUMBER = Pattern.compile("\\d+");
   private static final Set<String> COUNTED = Set.of("failure", "failures", "failed", "message", "messages",
@@ -79,7 +83,7 @@ public final class EvidenceCheck {
   /** Every part occurs in one of the texts, and the quote says more than its placeholders do. */
   private static boolean occurs(String quote, List<String> texts) {
     List<String> parts = new ArrayList<>();
-    for (String part : ELLIPSIS.split(normalize(quote))) {
+    for (String part : ELLIPSIS.split(LABEL.matcher(normalize(quote)).replaceFirst(""))) {
       String trimmed = EDGES.matcher(part).replaceAll("");
       if (!trimmed.isEmpty()) {
         parts.add(trimmed);

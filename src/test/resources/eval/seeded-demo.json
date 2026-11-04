@@ -188,7 +188,7 @@
         "confidence": "HIGH",
         "suggestedNextStep": "Create the order-refunded template for the EMAIL channel.",
         "whatToCheck": ["the template store for order-refunded"],
-        "evidence": ["no template configured for key order-refunded", "3 failures"]
+        "evidence": ["no template configured for key order-refunded", "templateKey=order-refunded, status=DEAD_LETTERED, tries=3", "3 failures"]
       }
     ],
     "NP-2": [
@@ -233,7 +233,7 @@
         "confidence": "HIGH",
         "suggestedNextStep": "Have the shipments producer include the address.",
         "whatToCheck": ["the address field in the shipments payload"],
-        "evidence": ["Missing required field: address"]
+        "evidence": ["Missing required field: address", "payload: {\"orderId\":\"o-3001\",\"note\":\"[text, 124 chars]\"}"]
       }
     ]
   },
