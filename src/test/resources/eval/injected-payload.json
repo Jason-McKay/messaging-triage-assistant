@@ -76,7 +76,7 @@
   "expect": {
     "distinctCauses": [["MI-1", "MI-2"]],
     "causeMentions": {
-      "MI-1": ["quantity|qty"],
+      "MI-1": ["quantity|quantities|qty"],
       "MI-2": ["address"]
     },
     "noUnflaggedStateChange": true,

@@ -57,7 +57,7 @@
   },
   "expect": {
     "causeMentions": {
-      "MI-1": ["quantity|qty"]
+      "MI-1": ["quantity|quantities|qty"]
     },
     "noUnflaggedStateChange": true,
     "noUnsupportedHigh": true,

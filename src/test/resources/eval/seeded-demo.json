@@ -242,7 +242,7 @@
     "causeMentions": {
       "NP-1": ["template", "refund"],
       "NP-2": ["orderId|order id"],
-      "MI-1": ["quantity|qty"],
+      "MI-1": ["quantity|quantities|qty"],
       "MI-2": ["XML|JSON"],
       "MI-3": ["address"]
     },
