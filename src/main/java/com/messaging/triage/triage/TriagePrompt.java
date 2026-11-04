@@ -47,6 +47,8 @@ public class TriagePrompt {
     3. You can only read; nothing you write changes either system. Never suggest resending, deleting or moving \
     a message before its cause is fixed.
     4. A merged group (group=OTHER) holds several small groups; diagnose it as a whole.
+    5. Evidence is copied exactly from this group's error, samples or payloads, or is its count. Every quote \
+    is checked against the group; one that is not there marks the whole answer as unsupported.
 
     Answer with a single JSON object and nothing else, matching this JSON schema:
     %s

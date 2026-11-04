@@ -8,11 +8,19 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.messaging.triage.report.FailureReport;
 import com.messaging.triage.source.mi.McpClientHolder;
 import com.messaging.triage.source.np.NotificationWorkerClient;
+import com.messaging.triage.triage.Confidence;
+import com.messaging.triage.triage.DiagnosisFlag;
+import com.messaging.triage.triage.GroupDiagnosis;
 import com.messaging.triage.triage.LatestTriageHolder;
+import com.messaging.triage.triage.ModelOutcome;
+import com.messaging.triage.triage.TriageAnswer;
+import com.messaging.triage.triage.TriageResult;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -98,6 +106,25 @@ class ChatToolLoopTest {
     assertThat(reply.toolsCalled()).hasSize(ChatService.MAX_TOOL_CALLS);
   }
 
+  @Test
+  void theLatestTriageReachesChatFencedWithItsFlags() {
+    LatestTriageHolder latest = new LatestTriageHolder();
+    GroupDiagnosis flagged = new GroupDiagnosis("NP-1", "The template is missing.", Confidence.LOW, "Add it.",
+      List.of("the template store"), List.of(), List.of(DiagnosisFlag.UNSUPPORTED));
+    latest.set(new TriageResult("t-1", Instant.EPOCH, new FailureReport(Instant.EPOCH, List.of(), List.of()),
+      new TriageAnswer("notification-platform: 1 failure, all in NP-1.", List.of(flagged)),
+      new ModelOutcome(true, "qwen3:8b", null, null, 1, 10), 5));
+    ChatModel chatModel = mock(ChatModel.class);
+    when(chatModel.call(any(Prompt.class))).thenReturn(answer("NP-1 is missing its template."));
+
+    chatService(chatModel, ReadOnlyToolsTest.advertisingAllSix(), latest)
+      .chat(new ChatRequest("What failed?", List.of()));
+
+    assertThat(lastPrompt(chatModel, 1).getInstructions().getFirst().getText())
+      .contains("<<<UNTRUSTED kind=latest-triage>>>notification-platform: 1 failure, all in NP-1. "
+        + "| NP-1 (flagged UNSUPPORTED): The template is missing.<<<END UNTRUSTED>>>");
+  }
+
   private static ChatResponse asking(String tool, String arguments) {
     AssistantMessage message = AssistantMessage.builder()
       .content("")
@@ -124,11 +151,16 @@ class ChatToolLoopTest {
   }
 
   private static ChatService chatService(ChatModel chatModel, McpSyncClient client) {
+    return chatService(chatModel, client, new LatestTriageHolder());
+  }
+
+
+  private static ChatService chatService(ChatModel chatModel, McpSyncClient client, LatestTriageHolder latest) {
     NotificationReadTools notifications = new NotificationReadTools(mock(NotificationWorkerClient.class), 100);
     ReadOnlyMcpTools mcp = new ReadOnlyMcpTools(new McpClientHolder(() -> client, () -> { }));
     return new ChatService(chatModel, "qwen3:8b", provider(NotificationReadTools.class, notifications),
       provider(ReadOnlyMcpTools.class, mcp), new StaticListableBeanFactory().getBeanProvider(McpClientHolder.class),
-      new LatestTriageHolder(), 10, 8000);
+      latest, 10, 8000);
   }
 
   private static <T> ObjectProvider<T> provider(Class<T> type, T bean) {

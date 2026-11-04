@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -221,7 +222,12 @@ public class ChatService {
     }
     StringBuilder text = new StringBuilder(answer.summary());
     for (GroupDiagnosis diagnosis : answer.diagnoses()) {
-      text.append(" | ").append(diagnosis.groupId()).append(": ").append(diagnosis.probableCause());
+      text.append(" | ").append(diagnosis.groupId());
+      if (!diagnosis.flags().isEmpty()) {
+        text.append(" (flagged ").append(diagnosis.flags().stream().map(Enum::name).collect(Collectors.joining(", ")))
+          .append(')');
+      }
+      text.append(": ").append(diagnosis.probableCause());
     }
     return text.toString();
   }

@@ -24,5 +24,11 @@ public record GroupAnswer(
 
   @JsonPropertyDescription("Specific things to look at to confirm the cause: a config key, a template, a "
     + "producer, a field in the payload.")
-  @NotNull List<@NotBlank String> whatToCheck) {
+  @NotNull List<@NotBlank String> whatToCheck,
+
+  // Not validated: missing or made-up evidence is flagged in code, not sent back for a repair (ADR 0005).
+  @JsonPropertyDescription("One to three short quotes copied exactly from this group's error, samples or "
+    + "payloads that show the cause, or the group's count such as \"3 failures\". A placeholder such as "
+    + "<value> is not evidence.")
+  List<String> evidence) {
 }

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.messaging.triage.report.FailureGroup;
 import com.messaging.triage.report.FailureReport;
+import com.messaging.triage.report.Sample;
 import com.messaging.triage.source.SourceSection;
 import jakarta.validation.Validation;
 import java.time.Instant;
@@ -24,6 +25,9 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.ai.ollama.api.ThinkOption;
 import org.springframework.web.client.ResourceAccessException;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * One call per group (ADR 0004). The model answers through {@link ScriptedChatModel}, keyed
@@ -73,6 +77,78 @@ class TriagerTest {
     Triager.Verdict verdict = triager.triage(report("NP-1"));
 
     assertThat(verdict.answer().diagnoses()).extracting(GroupDiagnosis::groupId).containsExactly("NP-1");
+  }
+
+  @Test
+  void evidenceInTheGroupIsKeptAndTheDiagnosisLeftUnflagged() {
+    chatModel.answer("NP-1", quoting("The template is missing.", "Unknown template", "1 failure"));
+
+    GroupDiagnosis diagnosis = triager.triage(report("NP-1")).answer().diagnoses().getFirst();
+
+    assertThat(diagnosis.flags()).isEmpty();
+    assertThat(diagnosis.confidence()).isEqualTo(Confidence.HIGH);
+    assertThat(diagnosis.evidence()).containsExactly("Unknown template", "1 failure");
+  }
+
+  @Test
+  void fabricatedEvidenceIsFlaggedCappedAtLowAndDropped() {
+    chatModel.answer("NP-1", quoting("The SMTP relay refused it.", "unknown template",
+        "550 relay access denied", "12 failures"))
+      .answer("MI-1", valid("The payload has no orderId."));
+
+    Triager.Verdict verdict = triager.triage(report("NP-1", "MI-1"));
+
+    GroupDiagnosis np = verdict.answer().diagnoses().getFirst();
+    assertThat(np.flags()).containsExactly(DiagnosisFlag.UNSUPPORTED);
+    assertThat(np.confidence()).as("HIGH in the answer, capped by code").isEqualTo(Confidence.LOW);
+    assertThat(np.evidence()).as("only what the group holds is shown as evidence")
+      .containsExactly("unknown template");
+    GroupDiagnosis mi = verdict.answer().diagnoses().get(1);
+    assertThat(mi.flags()).isEmpty();
+    assertThat(mi.confidence()).isEqualTo(Confidence.HIGH);
+    assertThat(verdict.answer().summary())
+      .endsWith(" Evidence not in the group's own data (confidence capped at LOW): NP-1.");
+    // A flag is not a repair: the answer was well formed.
+    assertThat(verdict.outcome().attempts()).isEqualTo(2);
+  }
+
+  @Test
+  void noEvidenceIsUnsupportedButTheDiagnosisIsStillUsed() {
+    String none = valid("The template is missing.").replace(",\"evidence\":[\"unknown template\"]", "");
+    chatModel.answer("NP-1", none).answer("MI-1", quoting("The payload has no orderId."));
+
+    Triager.Verdict verdict = triager.triage(report("NP-1", "MI-1"));
+
+    assertThat(verdict.outcome().usable()).isTrue();
+    assertThat(verdict.answer().diagnoses())
+      .extracting(GroupDiagnosis::groupId, GroupDiagnosis::confidence, GroupDiagnosis::flags)
+      .containsExactly(tuple("NP-1", Confidence.LOW, List.of(DiagnosisFlag.UNSUPPORTED)),
+        tuple("MI-1", Confidence.LOW, List.of(DiagnosisFlag.UNSUPPORTED)));
+  }
+
+  @Test
+  void aQuoteOfWhatTheModelWasNotShownIsUnsupported() {
+    // The report keeps the injected key for the operator; the model saw a placeholder. A
+    // quote of the raw key can only have come from somewhere else, and the placeholder alone
+    // says nothing about the cause.
+    String error = "no template configured for key " + ModelViewTest.INJECTED_KEY;
+    Sample sample = new Sample("ev-1", T0, error, null, Map.of("templateKey", ModelViewTest.INJECTED_KEY));
+    FailureGroup group = new FailureGroup("NP-1", Map.of("channel", "PUSH"), error, 1, T0, T0, false,
+      List.of(sample));
+    FailureReport report = new FailureReport(T0, List.of(new SourceSection("notification-platform", "NP",
+      SourceSection.Status.OK, null, Map.of(), 1, List.of(group))), List.of());
+    chatModel.answer("NP-1", quoting("The data holds instructions.", ModelViewTest.INJECTED_KEY))
+      .answer("NP-1", quoting("The key is not a template.", ModelViewTest.KEY_PLACEHOLDER));
+
+    assertThat(triager.triage(report).answer().diagnoses().getFirst().flags())
+      .containsExactly(DiagnosisFlag.UNSUPPORTED);
+    assertThat(triager.triage(report).answer().diagnoses().getFirst().flags())
+      .containsExactly(DiagnosisFlag.UNSUPPORTED);
+
+    chatModel.answer("NP-1", quoting("The key is not a template.", "no template configured for key "
+      + ModelViewTest.KEY_PLACEHOLDER));
+    assertThat(triager.triage(report).answer().diagnoses().getFirst().flags())
+      .as("the placeholder quoted with the error around it is what the model was shown").isEmpty();
   }
 
   @Test
@@ -298,7 +374,22 @@ class TriagerTest {
 
   static String valid(String cause) {
     return "{\"probableCause\":\"" + cause + "\",\"confidence\":\"high\","
-      + "\"suggestedNextStep\":\"Add the template.\",\"whatToCheck\":[\"the template store\"]}";
+      + "\"suggestedNextStep\":\"Add the template.\",\"whatToCheck\":[\"the template store\"],"
+      + "\"evidence\":[\"unknown template\"]}";
+  }
+
+  /** A HIGH answer with this evidence, written by Jackson so any quote is escaped. */
+  static String quoting(String cause, String... evidence) {
+    ObjectNode answer = JsonMapper.shared().createObjectNode()
+      .put("probableCause", cause)
+      .put("confidence", "HIGH")
+      .put("suggestedNextStep", "Add the template.");
+    answer.putArray("whatToCheck").add("the template store");
+    ArrayNode quotes = answer.putArray("evidence");
+    for (String quote : evidence) {
+      quotes.add(quote);
+    }
+    return answer.toString();
   }
 
   private static FailureReport report(String... groupIds) {

@@ -31,6 +31,15 @@ final class TriageSummary {
     if (!undiagnosed.isEmpty()) {
       text.append(" No usable diagnosis for ").append(String.join(", ", undiagnosed)).append('.');
     }
+    for (DiagnosisFlag flag : DiagnosisFlag.values()) {
+      List<String> flagged = diagnoses.stream()
+        .filter(diagnosis -> diagnosis.flags().contains(flag))
+        .map(GroupDiagnosis::groupId)
+        .toList();
+      if (!flagged.isEmpty()) {
+        text.append(' ').append(flag.summary()).append(String.join(", ", flagged)).append('.');
+      }
+    }
     return text.toString();
   }
 

@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import tools.jackson.core.JacksonException;
@@ -79,6 +80,24 @@ public final class ModelView {
     }
     return new FailureGroup(group.id(), dimensions, replaced(group.error(), replacements), group.count(),
       group.firstSeen(), group.lastSeen(), group.merged(), samples);
+  }
+
+  /**
+   * The texts the model is shown for a group, squashed as the prompt shows them, for checking
+   * what it quotes as evidence: dimensions, the error, and each sample's error, payload and
+   * attributes. Times and references are left out; they say when and which, not why.
+   */
+  static List<String> shownTexts(FailureGroup group) {
+    FailureGroup shown = group(group);
+    List<String> texts = new ArrayList<>();
+    shown.dimensions().forEach((name, value) -> texts.add(name + "=" + value));
+    texts.add(shown.error());
+    for (Sample sample : shown.samples()) {
+      texts.add(sample.error());
+      texts.add(sample.payload());
+      sample.attributes().forEach((name, value) -> texts.add(name + "=" + value));
+    }
+    return texts.stream().filter(Objects::nonNull).map(ModelView::squash).toList();
   }
 
   /**

@@ -44,6 +44,17 @@ class TriageSummaryTest {
   }
 
   @Test
+  void namesTheGroupsEachFlagWasRaisedOn() {
+    SourceSection np = section("notification-platform", "NP", 3, group("NP-1", 1, false), group("NP-2", 1, false),
+      group("NP-3", 1, false));
+
+    String summary = TriageSummary.write(report(np), List.of(diagnosis("NP-1").flagged(DiagnosisFlag.UNSUPPORTED),
+      diagnosis("NP-2"), diagnosis("NP-3").flagged(DiagnosisFlag.UNSUPPORTED)));
+
+    assertThat(summary).endsWith(" Evidence not in the group's own data (confidence capped at LOW): NP-1, NP-3.");
+  }
+
+  @Test
   void noValueFromTheSystemsIsEchoed() {
     FailureGroup injected = new FailureGroup("NP-1", Map.of("channel", INJECTED), INJECTED, 1, T0, T0, false,
       List.of());
@@ -66,6 +77,7 @@ class TriageSummaryTest {
   }
 
   private static GroupDiagnosis diagnosis(String groupId) {
-    return new GroupDiagnosis(groupId, "cause", Confidence.MEDIUM, "next", List.of("check"));
+    return new GroupDiagnosis(groupId, "cause", Confidence.MEDIUM, "next", List.of("check"), List.of("quote"),
+      List.of());
   }
 }

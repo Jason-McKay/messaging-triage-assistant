@@ -1,5 +1,6 @@
 package com.messaging.triage.triage;
 
+import com.messaging.triage.guard.EvidenceCheck;
 import com.messaging.triage.report.FailureGroup;
 import com.messaging.triage.report.FailureReport;
 import com.messaging.triage.source.SourceSection;
@@ -35,6 +36,8 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>Think blocks and code fences stripped, then parsed and checked ({@link AnswerValidator}).</li>
  *   <li>If that fails, one repair call for that group that shows the model its answer and
  *       what was wrong.</li>
+ *   <li>Each usable answer is checked in code: its evidence must be in its group's own data,
+ *       or it is flagged and its confidence capped (ADR 0005).</li>
  *   <li>The answer is assembled in code: each diagnosis under the id of the group it was
  *       asked about, and a summary written from the report's counts ({@link TriageSummary}).
  *       A group still unusable is left out and named; if none is usable, {@code usable=false}
@@ -112,7 +115,7 @@ public class Triager {
     }
     List<GroupDiagnosis> diagnoses = runs.stream()
       .filter(run -> run.answer != null)
-      .map(run -> GroupDiagnosis.of(run.group.id(), run.answer))
+      .map(Triager::checked)
       .toList();
     if (diagnoses.isEmpty()) {
       return new Verdict(null, new ModelOutcome(false, model, "model answer unusable: " + Problems.cap(
@@ -150,6 +153,23 @@ public class Triager {
     if (!repaired.usable()) {
       run.problems = repaired.problems();
     }
+  }
+
+  /**
+   * The answer as a diagnosis, after the checks code makes of what the model wrote (ADR 0005):
+   * evidence that is missing or not in the group's own data flags it UNSUPPORTED, and only the
+   * quotes that held are kept.
+   */
+  private static GroupDiagnosis checked(GroupRun run) {
+    EvidenceCheck.Result evidence = EvidenceCheck.check(run.answer.evidence(), ModelView.shownTexts(run.group),
+      run.group.count());
+    GroupDiagnosis diagnosis = GroupDiagnosis.of(run.group.id(), run.answer, evidence.matched());
+    if (!evidence.supported()) {
+      log.info("triage {}: evidence unsupported ({} quotes held, {} did not)", run.group.id(),
+        evidence.matched().size(), evidence.unmatched());
+      diagnosis = diagnosis.flagged(DiagnosisFlag.UNSUPPORTED);
+    }
+    return diagnosis;
   }
 
   /** One call in a free slot; null, with nothing sent, once the model has failed for any group. */
