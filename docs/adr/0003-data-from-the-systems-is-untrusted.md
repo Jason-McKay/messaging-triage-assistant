@@ -1,6 +1,6 @@
 # 3. Data from the systems is untrusted, and fenced as such
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [0006](0006-abstract-client-controlled-values.md)
 - **Date:** 2026-11-03, with v1
 
 ## Context
